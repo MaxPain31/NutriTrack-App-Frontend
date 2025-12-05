@@ -1,5 +1,5 @@
 import { useAuth } from '@/contexts/AuthContext';
-import { getHealthConditions, getInterventions, HealthCondition, Intervention } from '@/lib/api';
+import { API_BASE_URL, getHealthConditions, getInterventions, HealthCondition, Intervention } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,6 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function UpdateChildScreen() {
   const params = useLocalSearchParams<{
@@ -31,6 +32,7 @@ export default function UpdateChildScreen() {
   const childId = params.childId as string;
   const childName = (params.childName as string) || 'Alvarez, Johnny D.';
   const { token, isAuthenticated, handleTokenInvalidation } = useAuth();
+  const insets = useSafeAreaInsets();
 
   const [date, setDate] = useState<Date>(new Date());
   const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
@@ -44,6 +46,7 @@ export default function UpdateChildScreen() {
   const [isInterventionModalVisible, setIsInterventionModalVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [confirmationModalVisible, setConfirmationModalVisible] = useState(false);
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [statusModalTitle, setStatusModalTitle] = useState<'Success' | 'Error'>('Success');
   const [statusModalMessage, setStatusModalMessage] = useState('');
@@ -108,7 +111,7 @@ export default function UpdateChildScreen() {
     router.back();
   };
 
-  const handleSave = async () => {
+  const handleSaveClick = () => {
     if (isSaving) return;
 
     const newErrors: Partial<Record<FieldErrorKey, string>> = {};
@@ -129,6 +132,12 @@ export default function UpdateChildScreen() {
     }
 
     setErrors({});
+    setConfirmationModalVisible(true);
+  };
+
+  const handleConfirmSave = async () => {
+    if (isSaving) return;
+    setConfirmationModalVisible(false);
 
     const payload = {
       date: date.toISOString().split('T')[0],
@@ -154,7 +163,7 @@ export default function UpdateChildScreen() {
 
     try {
       const response = await fetch(
-        `http://localhost:8000/api/children/${childId}`,
+        `${API_BASE_URL}/api/children/${childId}`,
         {
           method: 'PUT',
           headers: {
@@ -166,7 +175,7 @@ export default function UpdateChildScreen() {
         },
       );
 
-      const data = await response.json();
+      const data = await response.json() as { errors?: Record<string, string[]>; message?: string };
       console.log('Update child progress API response:', data);
 
       if (!response.ok) {
@@ -231,7 +240,7 @@ export default function UpdateChildScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardView}>
           <View style={styles.content}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: Math.max(insets.top, 20) }]}>
               <TouchableOpacity
                 onPress={handleCancel}
                 style={styles.headerBack}>
@@ -256,7 +265,7 @@ export default function UpdateChildScreen() {
         style={styles.keyboardView}>
         <View style={styles.content}>
           {/* Header */}
-          <View style={styles.header}>
+          <View style={[styles.header, { paddingTop: Math.max(insets.top, 20) }]}>
             <TouchableOpacity
               onPress={handleCancel}
               style={styles.headerBack}>
@@ -431,7 +440,7 @@ export default function UpdateChildScreen() {
           </ScrollView>
 
           {/* Footer Buttons */}
-          <View style={styles.footerButtons}>
+          <View style={[styles.footerButtons, { paddingBottom: Math.max(insets.bottom, 20) }]}>
             <TouchableOpacity
               style={styles.cancelButton}
               onPress={handleCancel}>
@@ -439,7 +448,7 @@ export default function UpdateChildScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.saveButton, isSaving && { opacity: 0.7 }]}
-              onPress={handleSave}
+              onPress={handleSaveClick}
               disabled={isSaving}>
               {isSaving ? (
                 <ActivityIndicator color="#FFFFFF" />
@@ -567,6 +576,34 @@ export default function UpdateChildScreen() {
             </View>
           </Modal>
 
+          {/* Confirmation Modal */}
+          <Modal
+            visible={confirmationModalVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setConfirmationModalVisible(false)}>
+            <View style={styles.modalOverlay}>
+              <View style={styles.confirmationModalContent}>
+                <Text style={styles.confirmationModalTitle}>Confirm Save</Text>
+                <Text style={styles.confirmationModalMessage}>
+                  Are you sure you want to save these changes?
+                </Text>
+                <View style={styles.confirmationModalButtons}>
+                  <TouchableOpacity
+                    style={styles.confirmationModalCancelButton}
+                    onPress={() => setConfirmationModalVisible(false)}>
+                    <Text style={styles.confirmationModalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.confirmationModalConfirmButton}
+                    onPress={handleConfirmSave}>
+                    <Text style={styles.confirmationModalConfirmText}>Save</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+
           {/* Status Modal */}
           <Modal
             visible={statusModalVisible}
@@ -625,7 +662,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingBottom: 12,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
@@ -865,6 +902,55 @@ const styles = StyleSheet.create({
     backgroundColor: '#2563EB',
   },
   statusModalButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  confirmationModalContent: {
+    width: '80%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  confirmationModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 12,
+  },
+  confirmationModalMessage: {
+    fontSize: 14,
+    color: '#4B5563',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  confirmationModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  confirmationModalCancelButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 6,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+  },
+  confirmationModalCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  confirmationModalConfirmButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 6,
+    backgroundColor: '#9333EA',
+    alignItems: 'center',
+  },
+  confirmationModalConfirmText: {
     fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',

@@ -1,5 +1,5 @@
 import { useAuth } from '@/contexts/AuthContext';
-import { HealthCondition, getHealthConditions } from '@/lib/api';
+import { API_BASE_URL, HealthCondition, getHealthConditions } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,6 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function EditChildScreen() {
   const params = useLocalSearchParams<{
@@ -36,10 +37,10 @@ export default function EditChildScreen() {
     caregiverFirstName?: string;
     caregiverMiddleName?: string;
     caregiverLastName?: string;
-    caregiverExtension?: string;
   }>();
   const childId = params.childId as string;
   const { token, isAuthenticated, handleTokenInvalidation, user } = useAuth();
+  const insets = useSafeAreaInsets();
 
   const [firstName, setFirstName] = useState((params.firstName as string) || '');
   const [middleName, setMiddleName] = useState((params.middleName as string) || '');
@@ -65,13 +66,11 @@ export default function EditChildScreen() {
   const [caregiverLastName, setCaregiverLastName] = useState(
     (params.caregiverLastName as string) || '',
   );
-  const [caregiverExtension, setCaregiverExtension] = useState(
-    (params.caregiverExtension as string) || '',
-  );
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isHealthModalVisible, setIsHealthModalVisible] = useState(false);
+  const [confirmationModalVisible, setConfirmationModalVisible] = useState(false);
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [statusModalTitle, setStatusModalTitle] = useState<'Success' | 'Error'>('Success');
   const [statusModalMessage, setStatusModalMessage] = useState('');
@@ -121,7 +120,7 @@ export default function EditChildScreen() {
     router.back();
   };
 
-  const handleSave = async () => {
+  const handleSaveClick = () => {
     if (isSaving) return;
 
     const newErrors: Partial<Record<FieldErrorKey, string>> = {};
@@ -151,6 +150,12 @@ export default function EditChildScreen() {
     }
 
     setErrors({});
+    setConfirmationModalVisible(true);
+  };
+
+  const handleConfirmSave = async () => {
+    if (isSaving) return;
+    setConfirmationModalVisible(false);
 
     const sex_id = sex === 'Male' ? 1 : sex === 'Female' ? 2 : null;
 
@@ -170,7 +175,6 @@ export default function EditChildScreen() {
       caregiver_first_name: caregiverFirstName,
       caregiver_middle_name: caregiverMiddleName,
       caregiver_last_name: caregiverLastName,
-      caregiver_name_extension: caregiverExtension,
     };
 
     setIsSaving(true);
@@ -185,7 +189,7 @@ export default function EditChildScreen() {
     }
 
     try {
-      const response = await fetch(`http://localhost:8000/api/children/${childId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/children/${childId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -195,7 +199,7 @@ export default function EditChildScreen() {
         body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
+      const data = await response.json() as { errors?: Record<string, string[]>; message?: string };
       console.log('Update child API response:', data);
 
       if (!response.ok) {
@@ -291,7 +295,7 @@ export default function EditChildScreen() {
           style={styles.safe}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.container}>
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: Math.max(insets.top, 20) }]}>
               <TouchableOpacity onPress={handleCancel} style={styles.headerBack}>
                 <Ionicons name="chevron-back" size={22} color="#111827" />
               </TouchableOpacity>
@@ -315,7 +319,7 @@ export default function EditChildScreen() {
       >
         <View style={styles.container}>
           {/* Header */}
-          <View style={styles.header}>
+          <View style={[styles.header, { paddingTop: Math.max(insets.top, 20) }]}>
             <TouchableOpacity onPress={handleCancel} style={styles.headerBack}>
               <Ionicons name="chevron-back" size={22} color="#111827" />
             </TouchableOpacity>
@@ -547,15 +551,10 @@ export default function EditChildScreen() {
               caregiverLastName,
               setCaregiverLastName,
             )}
-            {renderTextField(
-              'Caregiver Name Extension',
-              caregiverExtension,
-              setCaregiverExtension,
-            )}
           </ScrollView>
 
           {/* Buttons */}
-          <View style={styles.footerButtons}>
+          <View style={[styles.footerButtons, { paddingBottom: Math.max(insets.bottom, 20) }]}>
             <TouchableOpacity
               style={styles.cancelButton}
               onPress={handleCancel}
@@ -564,7 +563,7 @@ export default function EditChildScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.saveButton, isSaving && { opacity: 0.7 }]}
-              onPress={handleSave}
+              onPress={handleSaveClick}
               disabled={isSaving}
             >
               {isSaving ? (
@@ -632,6 +631,37 @@ export default function EditChildScreen() {
                     onPress={() => setIsHealthModalVisible(false)}
                   >
                     <Text style={styles.modalCancelText}>Close</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Confirmation Modal */}
+          <Modal
+            visible={confirmationModalVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setConfirmationModalVisible(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.confirmationModalContent}>
+                <Text style={styles.confirmationModalTitle}>Confirm Save</Text>
+                <Text style={styles.confirmationModalMessage}>
+                  Are you sure you want to save these changes?
+                </Text>
+                <View style={styles.confirmationModalButtons}>
+                  <TouchableOpacity
+                    style={styles.confirmationModalCancelButton}
+                    onPress={() => setConfirmationModalVisible(false)}
+                  >
+                    <Text style={styles.confirmationModalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.confirmationModalConfirmButton}
+                    onPress={handleConfirmSave}
+                  >
+                    <Text style={styles.confirmationModalConfirmText}>Save</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -973,6 +1003,55 @@ const styles = StyleSheet.create({
     backgroundColor: '#9333EA',
   },
   statusModalButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  confirmationModalContent: {
+    width: '80%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  confirmationModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 12,
+  },
+  confirmationModalMessage: {
+    fontSize: 14,
+    color: '#4B5563',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  confirmationModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  confirmationModalCancelButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 6,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+  },
+  confirmationModalCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  confirmationModalConfirmButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 6,
+    backgroundColor: '#9333EA',
+    alignItems: 'center',
+  },
+  confirmationModalConfirmText: {
     fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',

@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ChildDetailsScreen() {
   const params = useLocalSearchParams<{
@@ -33,6 +34,7 @@ export default function ChildDetailsScreen() {
 
   const childId = (params.id as string) || '1';
   const { token, isAuthenticated, handleTokenInvalidation } = useAuth();
+  const insets = useSafeAreaInsets();
 
   interface ChildDetailsData {
     id: string;
@@ -53,7 +55,6 @@ export default function ChildDetailsScreen() {
     caregiverFirstName?: string | null;
     caregiverMiddleName?: string | null;
     caregiverLastName?: string | null;
-    caregiverExtension?: string | null;
     activeIntervention: string | null;
     healthCondition: string | null;
     weightForHeight: string;
@@ -111,6 +112,19 @@ export default function ChildDetailsScreen() {
                 .join(', ')
             : null;
 
+        // Construct caregiver full name
+        const caregiverFirstName = apiChild.caregiver?.caregiver_first_name ?? null;
+        const caregiverMiddleName = apiChild.caregiver?.caregiver_middle_name ?? null;
+        const caregiverLastName = apiChild.caregiver?.caregiver_last_name ?? null;
+        let caregiverFullName: string | null = null;
+        if (caregiverFirstName || caregiverLastName) {
+          const middleInitial = caregiverMiddleName
+            ? `${caregiverMiddleName.charAt(0).toUpperCase()}. `
+            : '';
+          caregiverFullName = `${caregiverFirstName || ''} ${middleInitial}${caregiverLastName || ''}`.trim();
+          caregiverFullName = toTitleCase(caregiverFullName);
+        }
+
         setChildData({
           id: apiChild.child_id,
           name: displayName,
@@ -126,13 +140,10 @@ export default function ChildDetailsScreen() {
           address,
           municipalityName,
           barangayName,
-          caregiver: null,
-          caregiverFirstName: apiChild.caregiver?.caregiver_first_name ?? null,
-          caregiverMiddleName: apiChild.caregiver?.caregiver_middle_name ?? null,
-          caregiverLastName: apiChild.caregiver?.caregiver_last_name ?? null,
-          caregiverExtension: apiChild.caregiver?.name_extension_id
-            ? String(apiChild.caregiver.name_extension_id)
-            : null,
+          caregiver: caregiverFullName,
+          caregiverFirstName,
+          caregiverMiddleName,
+          caregiverLastName,
           activeIntervention: interventionsList,
           healthCondition: healthConditionsList,
           weightForHeight: apiChild.wfh?.wfh_status || 'Unknown',
@@ -189,7 +200,7 @@ export default function ChildDetailsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.content}>
-          <View style={styles.header}>
+          <View style={[styles.header, { paddingTop: Math.max(insets.top, 20) }]}>
             <TouchableOpacity
               onPress={() => router.back()}
               style={styles.headerBack}>
@@ -210,7 +221,7 @@ export default function ChildDetailsScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 20) }]}>
           <TouchableOpacity
             onPress={() => router.back()}
             style={styles.headerBack}>
@@ -357,7 +368,7 @@ export default function ChildDetailsScreen() {
         </ScrollView>
 
         {/* Action Buttons */}
-        <View style={styles.footerButtons}>
+        <View style={[styles.footerButtons, { paddingBottom: Math.max(insets.bottom, 20) }]}>
           <TouchableOpacity
             style={styles.editButton}
             onPress={() =>
@@ -379,7 +390,6 @@ export default function ChildDetailsScreen() {
                   caregiverFirstName: childData.caregiverFirstName || '',
                   caregiverMiddleName: childData.caregiverMiddleName || '',
                   caregiverLastName: childData.caregiverLastName || '',
-                  caregiverExtension: childData.caregiverExtension || '',
                 },
               } as any)
             }>
@@ -423,7 +433,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingBottom: 12,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',

@@ -1,6 +1,6 @@
 // Configure your Laravel API URL here or set EXPO_PUBLIC_API_URL environment variable
 // Example: EXPO_PUBLIC_API_URL=http://your-laravel-api.com
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://72.60.236.137:8002';
 
 export interface LoginCredentials {
   username: string;

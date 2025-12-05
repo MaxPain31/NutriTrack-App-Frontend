@@ -1,9 +1,10 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { HealthCondition, getHealthConditions } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -17,14 +18,17 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function AddChildScreen() {
   const { user, token, isAuthenticated, handleTokenInvalidation } = useAuth();
+  const insets = useSafeAreaInsets();
   const [firstName, setFirstName] = useState('');
   const [middleName, setMiddleName] = useState('');
   const [lastName, setLastName] = useState('');
   const [nameExtension, setNameExtension] = useState('');
-  const [birthdate, setBirthdate] = useState('');
+  const [birthdate, setBirthdate] = useState<Date | null>(null);
+  const [isBirthdatePickerVisible, setIsBirthdatePickerVisible] = useState(false);
   const [weight, setWeight] = useState('');
   const [height, setHeight] = useState('');
   const [sex, setSex] = useState<'Male' | 'Female' | ''>('');
@@ -73,7 +77,7 @@ export default function AddChildScreen() {
     if (!lastName.trim()) {
       newErrors.lastName = 'Last Name is required.';
     }
-    if (!birthdate.trim()) {
+    if (!birthdate) {
       newErrors.birthdate = 'Birthdate is required.';
     }
     if (!weight || Number.isNaN(Number(weight))) {
@@ -101,7 +105,7 @@ export default function AddChildScreen() {
       child_middle_name: middleName || null,
       child_last_name: lastName,
       name_extension_id: nameExtension || null,
-      child_birthdate: birthdate, // already YYYY-MM-DD
+      child_birthdate: (birthdate as Date).toISOString().split('T')[0],
       weight,
       height,
       sex_id,
@@ -123,17 +127,17 @@ export default function AddChildScreen() {
     }
 
     try {
-      const response = await fetch('http://localhost:8000/api/children', {
-        method: 'POST',
+      const response = await fetch("http://72.60.236.137:8002/api/children", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
+          "Content-Type": "application/json",
+          Accept: "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
+      const data = await response.json() as { errors?: Record<string, string[]>; message?: string };
       console.log('Create child API response:', data);
 
       if (!response.ok) {
@@ -225,7 +229,7 @@ export default function AddChildScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.container}>
           {/* Header */}
-          <View style={styles.header}>
+          <View style={[styles.header, { paddingTop: Math.max(insets.top, 20) }]}>
             <TouchableOpacity onPress={() => router.back()} style={styles.headerBack}>
               <Ionicons name="chevron-back" size={22} color="#111827" />
             </TouchableOpacity>
@@ -260,27 +264,44 @@ export default function AddChildScreen() {
             {renderTextField('Last Name', lastName, setLastName, 'lastName')}
             {renderTextField('Name Extension', nameExtension, setNameExtension)}
 
-            {/* Birthdate (text input so it works on web & native) */}
+            {/* Birthdate */}
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldLabel}>Birthdate</Text>
-              <View style={styles.iconInput}>
-                <TextInput
-                  style={[
-                    styles.iconInputText,
-                    errors.birthdate && styles.fieldInputError,
-                  ]}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#9CA3AF"
-                  value={birthdate}
-                  onChangeText={text => {
-                    setErrors(prev => ({ ...prev, birthdate: undefined }));
-                    setBirthdate(text);
-                  }}
-                />
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={[
+                  styles.iconInput,
+                  errors.birthdate && styles.fieldInputError,
+                ]}
+                onPress={() => setIsBirthdatePickerVisible(true)}
+              >
+                <Text style={styles.iconInputText}>
+                  {birthdate ? birthdate.toLocaleDateString() : 'Select birthdate'}
+                </Text>
                 <Ionicons name="calendar-outline" size={18} color="#9CA3AF" />
-              </View>
+              </TouchableOpacity>
               {errors.birthdate && (
                 <Text style={styles.errorText}>{errors.birthdate}</Text>
+              )}
+              {isBirthdatePickerVisible && (
+                <DateTimePicker
+                  value={birthdate || new Date()}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(event, selectedDate) => {
+                    if (event.type === 'dismissed') {
+                      setIsBirthdatePickerVisible(false);
+                      return;
+                    }
+                    if (selectedDate) {
+                      setErrors(prev => ({ ...prev, birthdate: undefined }));
+                      setBirthdate(selectedDate);
+                    }
+                    if (Platform.OS !== 'ios') {
+                      setIsBirthdatePickerVisible(false);
+                    }
+                  }}
+                />
               )}
             </View>
 
@@ -370,7 +391,7 @@ export default function AddChildScreen() {
           </ScrollView>
 
           {/* Buttons */}
-          <View style={styles.footerButtons}>
+          <View style={[styles.footerButtons, { paddingBottom: Math.max(insets.bottom, 20) }]}>
             <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
@@ -566,9 +587,11 @@ const styles = StyleSheet.create({
   iconInput: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
     paddingVertical: 8,
+    paddingRight: 8,
   },
   iconInputText: {
     flex: 1,
@@ -724,8 +747,7 @@ const styles = StyleSheet.create({
   footerButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    padding: 16,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
     backgroundColor: '#FFFFFF',

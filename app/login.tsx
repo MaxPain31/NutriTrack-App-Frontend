@@ -9,6 +9,7 @@ import {
   ImageBackground,
   KeyboardAvoidingView,
   Platform,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,6 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function LoginScreen() {
   const [username, setUsername] = useState('');
@@ -24,6 +26,7 @@ export default function LoginScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { login, isAuthenticated, isLoading: authLoading } = useAuth();
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
@@ -58,19 +61,22 @@ export default function LoginScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled">
-        <ImageBackground
-          source={require('@/assets/images/login_background.png')}
-          style={styles.backgroundContainer}
-          resizeMode="cover">
-        </ImageBackground>
-
-        <View style={styles.loginCard}>
+    <SafeAreaView style={styles.safeArea}>
+      <ImageBackground
+        source={require('@/assets/images/login_background.png')}
+        style={styles.backgroundContainer}
+        resizeMode="cover">
+        <KeyboardAvoidingView
+          style={styles.container}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <ScrollView
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingTop: Math.max(insets.top, 30), paddingBottom: Math.max(insets.bottom, 30) }
+            ]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
+            <View style={styles.loginCard}>
           <View style={styles.logoContainer}>
             <Image
               source={require('@/assets/images/nutritrack_logo.png')}
@@ -162,29 +168,31 @@ export default function LoginScreen() {
             </Text>
           </View>
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </ImageBackground>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
     backgroundColor: '#1E1B4B',
+  },
+  backgroundContainer: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  container: {
+    flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
     padding: 30,
-  },
-  backgroundContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0, 
-    bottom: 0,
-    width: '100%',
-    height: '100%',
+    minHeight: '100%',
   },
   loginCard: {
     backgroundColor: '#FFFFFF',

@@ -17,6 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Child {
   id: string;
@@ -45,6 +46,7 @@ const toTitleCase = (value: string) =>
 
 export default function ChildListScreen() {
   const { isAuthenticated, isLoading, logout, token, handleTokenInvalidation, user } = useAuth();
+  const insets = useSafeAreaInsets();
   
   // Child list state
   const [children, setChildren] = useState<Child[]>([]);
@@ -312,7 +314,7 @@ export default function ChildListScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.layout}>
         <View style={styles.content}>
-          <View style={styles.topHeader}>
+          <View style={[styles.topHeader, { paddingTop: Math.max(insets.top, 20) }]}>
             <View style={styles.topHeaderLeft}>
               <View style={styles.topHeaderBrand}>
                 <Text style={styles.topHeaderBrandTextPrimary}>Nutri</Text>
@@ -554,7 +556,7 @@ export default function ChildListScreen() {
 
             {/* Pagination pinned to bottom - outside ScrollView */}
             {totalItems > 0 && totalPages > 0 && (
-              <View style={styles.pagination}>
+              <View style={[styles.pagination, { paddingBottom: Math.max(insets.bottom, 16) }]}>
                   <View style={styles.paginationLeft}>
                     <Text style={styles.paginationText}>Show</Text>
                     <View
@@ -758,7 +760,8 @@ const styles = StyleSheet.create({
   },
   topHeader: {
     backgroundColor: "#FFFFFF",
-    padding: 20,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -981,7 +984,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingTop: 12,
-    marginBottom: 20,
+    marginBottom: 30,
     shadowColor: "#000",
     shadowOffset: {
       width: 0,
@@ -1045,8 +1048,7 @@ const styles = StyleSheet.create({
   pagination: {
     flexDirection: "column",
     justifyContent: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    padding: 16,
     borderTopWidth: 1,
     borderTopColor: "#E5E7EB",
     gap: 12,
