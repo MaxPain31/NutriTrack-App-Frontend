@@ -1,12 +1,15 @@
 import { useAuth } from '@/contexts/AuthContext';
-import { HealthCondition, getHealthConditions } from '@/lib/api';
+import { HealthCondition, NameExtension, getHealthConditions, getNameExtensions } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -26,7 +29,12 @@ export default function AddChildScreen() {
   const [firstName, setFirstName] = useState('');
   const [middleName, setMiddleName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [nameExtension, setNameExtension] = useState('');
+  const [nameExtensionId, setNameExtensionId] = useState<number | null>(null);
+  const [nameExtensionLabel, setNameExtensionLabel] = useState('');
+  const [nameExtensionOther, setNameExtensionOther] = useState('');
+  const [nameExtensions, setNameExtensions] = useState<NameExtension[]>([]);
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imagePath, setImagePath] = useState<string | null>(null);
   const [birthdate, setBirthdate] = useState<Date | null>(null);
   const [isBirthdatePickerVisible, setIsBirthdatePickerVisible] = useState(false);
   const [weight, setWeight] = useState('');
@@ -35,6 +43,7 @@ export default function AddChildScreen() {
   const [healthConditions, setHealthConditions] = useState<HealthCondition[]>([]);
   const [selectedHealthConditionIds, setSelectedHealthConditionIds] = useState<number[]>([]);
   const [isHealthModalVisible, setIsHealthModalVisible] = useState(false);
+  const [isNameExtModalVisible, setIsNameExtModalVisible] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [statusModalTitle, setStatusModalTitle] = useState<'Success' | 'Error'>('Success');
@@ -44,14 +53,18 @@ export default function AddChildScreen() {
   const [errors, setErrors] = useState<Partial<Record<FieldErrorKey, string>>>({});
 
   useEffect(() => {
-    const loadHealthConditions = async () => {
+    const loadMeta = async () => {
       if (!token || !isAuthenticated) return;
 
       try {
-        const data = await getHealthConditions(token);
-        setHealthConditions(data);
+        const [hc, ext] = await Promise.all([
+          getHealthConditions(token),
+          getNameExtensions(token),
+        ]);
+        setHealthConditions(hc);
+        setNameExtensions(ext);
       } catch (error) {
-        console.error('Error loading health conditions:', error);
+        console.error('Error loading metadata:', error);
         if (error instanceof Error && error.message === 'TOKEN_INVALIDATED') {
           handleTokenInvalidation();
           return;
@@ -59,11 +72,27 @@ export default function AddChildScreen() {
       }
     };
 
-    loadHealthConditions();
+    loadMeta();
   }, [token, isAuthenticated, handleTokenInvalidation]);
 
   const handleCancel = () => {
     router.back();
+  };
+
+  const handlePickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+    });
+    if (!result.canceled && result.assets?.length) {
+      const asset = result.assets[0];
+      setImageUri(asset.uri);
+      const fileName = asset.uri.split('/').pop() || `child_${Date.now()}.jpg`;
+      const basePath =
+        process.env.EXPO_PUBLIC_FTP_BASE_PATH ||
+        'ftp://u961600873.nutritrack@ftp.mostlysunnytech.com/public/assets/images/child_profile/';
+      setImagePath(`${basePath}${fileName}`);
+    }
   };
 
   const handleSave = async () => {
@@ -97,28 +126,94 @@ export default function AddChildScreen() {
 
     setErrors({});
 
-    // Map to API field names / formats
+    const formData = new FormData();
     const sex_id = sex === 'Male' ? 1 : sex === 'Female' ? 2 : null;
-
-    const payload = {
-      child_first_name: firstName,
-      child_middle_name: middleName || null,
-      child_last_name: lastName,
-      name_extension_id: nameExtension || null,
-      child_birthdate: (birthdate as Date).toISOString().split('T')[0],
-      weight,
-      height,
-      sex_id,
-      health_condition_ids: selectedHealthConditionIds,
-      municipality_id: user?.profile?.municipality_id ?? null,
-    barangay_id: user?.profile?.barangay_id ?? null,
-    created_by: user?.user_id ?? null,
-    };
+    formData.append('child_first_name', firstName);
+    formData.append('child_middle_name', middleName || '');
+    formData.append('child_last_name', lastName);
+    if (nameExtensionId !== null) {
+      formData.append('name_extension_id', String(nameExtensionId));
+    } else if (nameExtensionLabel === 'Other' && nameExtensionOther.trim()) {
+      formData.append('name_extension_name', nameExtensionOther.trim());
+    } else {
+      formData.append('name_extension_id', '');
+    }
+    formData.append('child_birthdate', (birthdate as Date).toISOString().split('T')[0]);
+    formData.append('weight', weight);
+    formData.append('height', height);
+    if (sex_id !== null) formData.append('sex_id', String(sex_id));
+    selectedHealthConditionIds.forEach(id =>
+      formData.append('health_condition_ids[]', String(id)),
+    );
+    formData.append(
+      'municipality_id',
+      user?.profile?.municipality_id ? String(user.profile.municipality_id) : '',
+    );
+    formData.append(
+      'barangay_id',
+      user?.profile?.barangay_id ? String(user.profile.barangay_id) : '',
+    );
+    formData.append('created_by', user?.user_id ? String(user.user_id) : '');
+    if (imageUri) {
+      const fileName = imageUri.split('/').pop() || `child_${Date.now()}.jpg`;
+      const extension = fileName.split('.').pop()?.toLowerCase();
+      const mimeType =
+        extension === 'png'
+          ? 'image/png'
+          : extension === 'jpg' || extension === 'jpeg'
+            ? 'image/jpeg'
+            : 'image/jpeg';
+      
+      // Convert image to base64 as workaround for React Native FormData bug
+      try {
+        console.log('Converting image to base64, URI:', imageUri);
+        let base64: string;
+        
+        if (Platform.OS === 'web') {
+          // Web platform: use fetch and FileReader
+          const response = await fetch(imageUri);
+          const blob = await response.blob();
+          base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const result = reader.result as string;
+              // Remove data URL prefix (e.g., "data:image/jpeg;base64,")
+              const base64Data = result.split(',')[1];
+              resolve(base64Data);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } else {
+          // Native platform: use expo-file-system
+          base64 = await FileSystem.readAsStringAsync(imageUri, {
+            encoding: 'base64' as any,
+          });
+        }
+        
+        console.log('Image converted to base64, length:', base64.length);
+        console.log('Base64 first 50 chars:', base64.substring(0, 50));
+        console.log('Base64 type:', typeof base64);
+        
+        // Send base64 as profile_image field - backend should detect and handle base64
+        // Ensure it's a string and append directly
+        const base64String = String(base64);
+        console.log('Base64String type after String():', typeof base64String);
+        formData.append('profile_image', base64String);
+        formData.append('profile_image_name', fileName);
+        formData.append('profile_image_type', mimeType);
+        formData.append('profile_image_is_base64', 'true');
+      } catch (error) {
+        console.error('Error converting image to base64:', error);
+        // Don't send fallback - let backend know image upload failed
+        formData.append('profile_image_error', 'Failed to convert image to base64');
+      }
+    }
 
     setIsSaving(true);
 
     if (!token || !isAuthenticated) {
-      console.log('Submitting child form (no token, test only):', payload);
+      console.log('Submitting child form (no token, test only): formData prepared');
       setStatusModalTitle('Success');
       setStatusModalMessage('Child payload logged to console (test only).');
       setStatusModalVisible(true);
@@ -127,35 +222,58 @@ export default function AddChildScreen() {
     }
 
     try {
+      // Log FormData contents for debugging
+      console.log('FormData contents:');
+      const formDataEntries: any[] = [];
+      (formData as any)._parts?.forEach((part: any) => {
+        if (Array.isArray(part) && part.length >= 2) {
+          const [key, value] = part;
+          if (key === 'profile_image') {
+            console.log('profile_image value type:', typeof value);
+            console.log('profile_image value is string:', typeof value === 'string');
+            console.log('profile_image value length:', typeof value === 'string' ? value.length : 'N/A');
+            if (typeof value === 'string' && value.length > 100) {
+              formDataEntries.push([key, `[base64 string, length: ${value.length}, first 50: ${value.substring(0, 50)}]`]);
+            } else {
+              formDataEntries.push([key, `[${typeof value}: ${JSON.stringify(value).substring(0, 100)}]`]);
+            }
+          } else {
+            formDataEntries.push([key, typeof value === 'object' ? JSON.stringify(value) : value]);
+          }
+        }
+      });
+      console.log('FormData entries:', formDataEntries);
+      
+      // Use fetch with FormData - base64 strings work fine with fetch
       const response = await fetch("http://72.60.236.137:8002/api/children", {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
+          Accept: 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(payload),
+        body: formData as any,
       });
 
-      const data = await response.json() as { errors?: Record<string, string[]>; message?: string };
-      console.log('Create child API response:', data);
+      const responseData = await response.json() as { errors?: Record<string, string[]>; message?: string };
+      console.log('Create child API response:', responseData);
 
       if (!response.ok) {
         // Try to surface Laravel validation errors nicely
         let message = 'Failed to save child.';
-        if (data && data.errors) {
-          const firstKey = Object.keys(data.errors)[0];
-          const firstMsgArr = data.errors[firstKey];
+        if (responseData && responseData.errors) {
+          const firstKey = Object.keys(responseData.errors)[0];
+          const firstMsgArr = responseData.errors[firstKey];
           message =
             Array.isArray(firstMsgArr) && firstMsgArr.length > 0
               ? firstMsgArr[0]
-              : data.message || 'Validation failed.';
-        } else if (data && data.message) {
-          message = data.message;
+              : responseData.message || 'Validation failed.';
+        } else if (responseData && responseData.message) {
+          message = responseData.message;
         }
         setStatusModalTitle('Error');
         setStatusModalMessage(message);
         setStatusModalVisible(true);
+        setIsSaving(false);
         return;
       }
 
@@ -178,12 +296,16 @@ export default function AddChildScreen() {
     onChangeText: (text: string) => void,
     fieldKey?: FieldErrorKey,
     props: any = {},
+    required?: boolean,
   ) => (
     <View style={styles.fieldGroup}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldLabel}>
+        {label}
+        {required ? <Text style={styles.requiredAsterisk}> *</Text> : null}
+      </Text>
       <TextInput
         style={[styles.fieldInput, fieldKey && errors[fieldKey] && styles.fieldInputError]}
-        placeholder={label}
+        placeholder={props.placeholder || label}
         placeholderTextColor="#9CA3AF"
         value={value}
         onChangeText={text => {
@@ -237,21 +359,29 @@ export default function AddChildScreen() {
             <View style={styles.headerRightSpacer} />
           </View>
 
-          {/* Gradient avatar area */}
+          {/* Gradient avatar area with upload */}
           <LinearGradient
-            colors={['#A8B5FF', '#E879F9']}
+            colors={['#4FC6D3', '#7B66F5']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.banner}>
-            <View style={styles.avatarCircle}>
-              <LinearGradient
-                colors={['#60A5FA', '#A855F7']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.avatarInner}>
-                <Ionicons name="person" size={40} color="#FFFFFF" />
-              </LinearGradient>
-            </View>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={styles.avatarCircle}
+              onPress={handlePickImage}>
+              {imageUri ? (
+                <Image source={{ uri: imageUri }} style={styles.avatarInnerImage} />
+              ) : (
+                <LinearGradient
+                  colors={['#4FC6D3', '#7B66F5']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.avatarInner}>
+                  <Ionicons name="person" size={40} color="#FFFFFF" />
+                </LinearGradient>
+              )}
+            </TouchableOpacity>
+            <Text style={styles.avatarHint}>Tap to upload child photo</Text>
           </LinearGradient>
 
           {/* Form */}
@@ -259,14 +389,53 @@ export default function AddChildScreen() {
             style={styles.formScroll}
             contentContainerStyle={styles.formContent}
             keyboardShouldPersistTaps="handled">
-            {renderTextField('First Name', firstName, setFirstName, 'firstName')}
-            {renderTextField('Middle Name', middleName, setMiddleName)}
-            {renderTextField('Last Name', lastName, setLastName, 'lastName')}
-            {renderTextField('Name Extension', nameExtension, setNameExtension)}
+            {renderTextField('First Name', firstName, setFirstName, 'firstName', {
+              placeholder: 'e.g., Juan',
+            }, true)}
+            {renderTextField('Middle Name', middleName, setMiddleName, undefined, {
+              placeholder: 'e.g., Santos',
+            })}
+            {renderTextField('Last Name', lastName, setLastName, 'lastName', {
+              placeholder: 'e.g., Dela Cruz',
+            }, true)}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>Name Extension</Text>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={styles.dropdownInput}
+                onPress={() => setIsNameExtModalVisible(true)}>
+                <Text
+                  style={
+                    nameExtensionId || nameExtensionLabel || nameExtensionOther
+                      ? styles.dropdownValue
+                      : styles.dropdownPlaceholder
+                  }>
+                  {nameExtensionId
+                    ? nameExtensionLabel
+                    : nameExtensionOther
+                      ? `Other: ${nameExtensionOther}`
+                      : 'Select extension (optional, e.g., Jr., Sr., II)'}
+                </Text>
+                <Ionicons name="chevron-down" size={18} color="#9CA3AF" />
+              </TouchableOpacity>
+              {nameExtensionLabel === 'Other' && (
+                <TextInput
+                  style={[styles.fieldInput, { marginTop: 8 }]}
+                  placeholder="Enter other extension (e.g., Jr., Sr., II)"
+                  placeholderTextColor="#9CA3AF"
+                  value={nameExtensionOther}
+                  onChangeText={text => {
+                    setNameExtensionOther(text);
+                  }}
+                />
+              )}
+            </View>
 
             {/* Birthdate */}
             <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Birthdate</Text>
+              <Text style={styles.fieldLabel}>
+                Birthdate<Text style={styles.requiredAsterisk}> *</Text>
+              </Text>
               <TouchableOpacity
                 activeOpacity={0.8}
                 style={[
@@ -307,34 +476,35 @@ export default function AddChildScreen() {
 
             {renderTextField('Weight (kg)', weight, setWeight, 'weight', {
               keyboardType: 'numeric',
-            })}
+              placeholder: 'e.g., 12.5',
+            }, true)}
             {renderTextField('Height (cm)', height, setHeight, 'height', {
               keyboardType: 'numeric',
-            })}
+              placeholder: 'e.g., 95',
+            }, true)}
 
-            {/* Sex selector */}
+            {/* Sex selector (radio) */}
             <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Sex</Text>
-              <View style={styles.sexRow}>
-                {(['Male', 'Female'] as const).map(option => (
-                  <TouchableOpacity
-                    key={option}
-                    style={[
-                      styles.sexOption,
-                      sex === option && styles.sexOptionActive,
-                    ]}
-                    onPress={() => setSex(option)}
-                  >
-                    <Text
-                      style={[
-                        styles.sexOptionText,
-                        sex === option && styles.sexOptionTextActive,
-                      ]}
+              <Text style={styles.fieldLabel}>
+                Sex<Text style={styles.requiredAsterisk}> *</Text>
+              </Text>
+              <View style={styles.radioRow}>
+                {(['Male', 'Female'] as const).map(option => {
+                  const selected = sex === option;
+                  return (
+                    <TouchableOpacity
+                      key={option}
+                      style={styles.radioOption}
+                      onPress={() => setSex(option)}
+                      activeOpacity={0.8}
                     >
-                      {option}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <View style={[styles.radioOuter, selected && styles.radioOuterActive]}>
+                        {selected && <View style={styles.radioInner} />}
+                      </View>
+                      <Text style={styles.radioLabel}>{option}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
               {errors.sex && (
                 <Text style={styles.errorText}>{errors.sex}</Text>
@@ -407,6 +577,71 @@ export default function AddChildScreen() {
               )}
             </TouchableOpacity>
           </View>
+
+          {/* Name Extension Modal */}
+          <Modal
+            visible={isNameExtModalVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setIsNameExtModalVisible(false)}>
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Select Extension</Text>
+                <ScrollView style={styles.modalList}>
+                  {nameExtensions.map(option => {
+                    const isSelected = nameExtensionId === option.name_extension_id;
+                    return (
+                      <TouchableOpacity
+                        key={option.name_extension_id}
+                        style={styles.modalOption}
+                        onPress={() => {
+                          setNameExtensionId(option.name_extension_id);
+                          setNameExtensionLabel(option.name_extension);
+                          setNameExtensionOther('');
+                          setIsNameExtModalVisible(false);
+                        }}>
+                        <View
+                          style={[
+                            styles.checkbox,
+                            isSelected && styles.checkboxSelected,
+                          ]}>
+                          {isSelected && (
+                            <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                          )}
+                        </View>
+                        <Text style={styles.modalOptionText}>{option.name_extension}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  <TouchableOpacity
+                    style={styles.modalOption}
+                    onPress={() => {
+                      setNameExtensionId(null);
+                      setNameExtensionLabel('Other');
+                      setIsNameExtModalVisible(false);
+                    }}>
+                    <View
+                      style={[
+                        styles.checkbox,
+                        nameExtensionLabel === 'Other' && styles.checkboxSelected,
+                      ]}>
+                      {nameExtensionLabel === 'Other' && (
+                        <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                      )}
+                    </View>
+                    <Text style={styles.modalOptionText}>Other</Text>
+                  </TouchableOpacity>
+                </ScrollView>
+                <View style={styles.modalFooter}>
+                  <TouchableOpacity
+                    style={styles.modalCancelButton}
+                    onPress={() => setIsNameExtModalVisible(false)}>
+                    <Text style={styles.modalCancelText}>Close</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
 
           {/* Health Conditions Modal */}
           <Modal
@@ -558,6 +793,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatarInnerImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    resizeMode: 'cover',
+  },
+  avatarHint: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#F9FAFB',
+  },
   formScroll: {
     flex: 1,
   },
@@ -613,6 +859,10 @@ const styles = StyleSheet.create({
   dropdownValue: {
     fontSize: 14,
     color: '#111827',
+  },
+  requiredAsterisk: {
+    color: '#DC2626',
+    fontWeight: '700',
   },
   readonlyInput: {
     borderBottomWidth: 1,
@@ -743,6 +993,40 @@ const styles = StyleSheet.create({
   sexOptionTextActive: {
     color: '#4C1D95',
     fontWeight: '600',
+  },
+  radioRow: {
+    flexDirection: 'row',
+    gap: 16,
+    marginTop: 4,
+  },
+  radioOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  radioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#9CA3AF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  radioOuterActive: {
+    borderColor: '#8B5CF6',
+  },
+  radioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#8B5CF6',
+  },
+  radioLabel: {
+    fontSize: 14,
+    color: '#111827',
+    fontWeight: '500',
   },
   footerButtons: {
     flexDirection: 'row',

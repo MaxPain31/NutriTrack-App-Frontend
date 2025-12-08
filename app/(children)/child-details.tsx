@@ -1,6 +1,7 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { ChildData, getChildById } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -43,6 +44,7 @@ export default function ChildDetailsScreen() {
     middleName: string | null;
     lastName: string;
     nameExtension: string | null;
+    nameExtensionLabel?: string | null;
     height: number;
     weight: number;
     ageMonths: number;
@@ -60,6 +62,7 @@ export default function ChildDetailsScreen() {
     weightForHeight: string;
     weightForAge: string;
     heightForAge: string;
+    profileImage?: string | null;
   }
 
   const [childData, setChildData] = useState<ChildDetailsData | null>(null);
@@ -83,6 +86,11 @@ export default function ChildDetailsScreen() {
       try {
         const apiChild: ChildData = await getChildById(token, childId);
 
+        const rawNameExtension = (apiChild as any).name_extension;
+        const nameExtensionLabel =
+          (rawNameExtension && rawNameExtension.name_extension) ||
+          (apiChild as any)?.name_extension_name ||
+          null;
         const middleInitial = apiChild.child_middle_name
           ? `${apiChild.child_middle_name.charAt(0).toUpperCase()}. `
           : '';
@@ -125,6 +133,15 @@ export default function ChildDetailsScreen() {
           caregiverFullName = toTitleCase(caregiverFullName);
         }
 
+        // Check if image_path contains "default" or is null/empty
+        const imagePath = apiChild.image_path || '';
+        const isDefaultImage = !imagePath || imagePath.toLowerCase().includes('default');
+        const imageUrl = isDefaultImage ? null : ((apiChild as any).image_url || null);
+        
+        console.log('Child image_url:', imageUrl);
+        console.log('Child image_path:', apiChild.image_path);
+        console.log('Is default image:', isDefaultImage);
+        
         setChildData({
           id: apiChild.child_id,
           name: displayName,
@@ -132,6 +149,7 @@ export default function ChildDetailsScreen() {
           middleName: apiChild.child_middle_name ?? null,
           lastName: apiChild.child_last_name,
           nameExtension: apiChild.name_extension_id ? String(apiChild.name_extension_id) : null,
+          nameExtensionLabel,
           height: parseFloat(apiChild.height) || 0,
           weight: parseFloat(apiChild.weight) || 0,
           ageMonths: apiChild.age,
@@ -146,9 +164,10 @@ export default function ChildDetailsScreen() {
           caregiverLastName,
           activeIntervention: interventionsList,
           healthCondition: healthConditionsList,
-          weightForHeight: apiChild.wfh?.wfh_status || 'Unknown',
-          weightForAge: apiChild.wfa?.wfa_status || 'Unknown',
-          heightForAge: apiChild.hfa?.hfa_status || 'Unknown',
+          weightForHeight: normalizeStatus(apiChild.wfh?.wfh_status),
+          weightForAge: normalizeStatus(apiChild.wfa?.wfa_status),
+          heightForAge: normalizeStatus(apiChild.hfa?.hfa_status),
+          profileImage: imageUrl,
         });
       } catch (error) {
         console.error('Error loading child details:', error);
@@ -173,6 +192,12 @@ export default function ChildDetailsScreen() {
     });
   };
 
+  const normalizeStatus = (status?: string) => {
+    const trimmed = (status || '').trim();
+    if (!trimmed) return 'Unknown';
+    return trimmed.toLowerCase() === 'error' ? 'Out of Range' : trimmed;
+  };
+
   const getStatusColor = (status: string | undefined) => {
     const normalized = (status || '').toLowerCase();
     switch (normalized) {
@@ -190,6 +215,7 @@ export default function ChildDetailsScreen() {
         return { bg: '#FEF3C7', text: '#92400E' };
       case 'tall':
         return { bg: '#DBEAFE', text: '#1D4ED8' };
+      case 'out of range':
       case 'error':
       default:
         return { bg: '#F3F4F6', text: '#6B7280' };
@@ -237,16 +263,40 @@ export default function ChildDetailsScreen() {
           {/* Main Child Info Card with Gradient */}
           <View style={styles.mainCard}>
             <LinearGradient
-              colors={['#60A5FA', '#A855F7']}
+              colors={['#4FC6D3', '#7B66F5']}
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: 1 }}
               style={styles.gradientCard}>
               <View style={styles.avatarContainer}>
                 <View style={styles.avatarCircle}>
-                  <Ionicons name="person" size={40} color="#FFFFFF" />
+                  {childData.profileImage ? (
+                    <Image 
+                      source={{ 
+                        uri: childData.profileImage,
+                        headers: token ? {
+                          'Authorization': `Bearer ${token}`,
+                        } : undefined,
+                      }} 
+                      style={styles.avatarInnerImage}
+                      contentFit="cover"
+                      transition={200}
+                      onError={(error) => {
+                        console.error('Image load error:', error);
+                        console.log('Failed to load image URL:', childData.profileImage);
+                      }}
+                      onLoad={() => {
+                        console.log('Image loaded successfully:', childData.profileImage);
+                      }}
+                    />
+                  ) : (
+                    <Ionicons name="person" size={40} color="#FFFFFF" />
+                  )}
                 </View>
               </View>
-              <Text style={styles.childName}>{childData.name}</Text>
+              <Text style={styles.childName}>
+                {childData.name}
+                {childData.nameExtensionLabel ? ` ${childData.nameExtensionLabel}` : ''}
+              </Text>
               <View style={styles.metricsRow}>
                 <View style={styles.metric}>
                   <Text style={styles.metricLabel}>Height</Text>
@@ -454,6 +504,12 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     gap: 16,
+  },
+  avatarInnerImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    resizeMode: 'cover',
   },
   loadingContainer: {
     flex: 1,

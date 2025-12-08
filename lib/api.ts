@@ -85,9 +85,9 @@ export async function login(credentials: LoginCredentials): Promise<LoginRespons
       body: JSON.stringify(credentials),
     });
 
-    let data;
+    let data: LoginResponse;
     try {
-      data = await response.json();
+      data = await response.json() as LoginResponse;
     } catch (jsonError) {
       // If response is not JSON, get text instead
       const text = await response.text();
@@ -159,9 +159,9 @@ export async function getUser(token: string) {
     if (!response.ok) {
       // Check for token invalidation
       if (response.status === 401) {
-        let errorData;
+        let errorData: { message?: string };
         try {
-          errorData = await response.json();
+          errorData = await response.json() as { message?: string };
         } catch {
           errorData = { message: 'Unauthorized' };
         }
@@ -177,7 +177,7 @@ export async function getUser(token: string) {
       throw new Error('Failed to fetch user');
     }
 
-    return await response.json();
+    return await response.json() as any;
   } catch (error) {
     if (error instanceof Error && error.message === 'TOKEN_INVALIDATED') {
       throw error;
@@ -232,6 +232,11 @@ export interface Intervention {
   updated_at: string;
 }
 
+export interface NameExtension {
+  name_extension_id: number;
+  name_extension: string;
+}
+
 export interface ChildCreator {
   user_id: string;
   username: string;
@@ -254,6 +259,7 @@ export interface ChildData {
   age: number;
   caregiver_id: string | null;
   image_path: string;
+  image_url?: string | null;
   height: string;
   weight: string;
   wfa_id: number;
@@ -387,9 +393,9 @@ export async function getChildren(
     if (!response.ok) {
       // Check for token invalidation
       if (response.status === 401) {
-        let errorData;
+        let errorData: { message?: string };
         try {
-          errorData = await response.json();
+          errorData = await response.json() as { message?: string };
         } catch {
           errorData = { message: 'Unauthorized' };
         }
@@ -405,7 +411,7 @@ export async function getChildren(
       throw new Error('Failed to fetch children');
     }
 
-    return await response.json();
+    return await response.json() as ChildrenResponse;
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
       throw error;
@@ -434,9 +440,9 @@ export async function getChildById(token: string, childId: string): Promise<Chil
 
     if (!response.ok) {
       if (response.status === 401) {
-        let errorData;
+        let errorData: { message?: string };
         try {
-          errorData = await response.json();
+          errorData = await response.json() as { message?: string };
         } catch {
           errorData = { message: 'Unauthorized' };
         }
@@ -453,7 +459,7 @@ export async function getChildById(token: string, childId: string): Promise<Chil
       throw new Error('Failed to fetch child');
     }
 
-    const data = await response.json();
+    const data = await response.json() as { child: ChildData };
     // API returns shape: { child: { ... } }
     return data.child as ChildData;
   } catch (error) {
@@ -478,9 +484,9 @@ export async function getHealthConditions(token: string): Promise<HealthConditio
 
     if (!response.ok) {
       if (response.status === 401) {
-        let errorData;
+        let errorData: { message?: string };
         try {
-          errorData = await response.json();
+          errorData = await response.json() as { message?: string };
         } catch {
           errorData = { message: 'Unauthorized' };
         }
@@ -497,7 +503,7 @@ export async function getHealthConditions(token: string): Promise<HealthConditio
       throw new Error('Failed to fetch health conditions');
     }
 
-    const data = await response.json();
+    const data = await response.json() as { health_conditions?: HealthCondition[] };
     return (data.health_conditions || []) as HealthCondition[];
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
@@ -521,9 +527,9 @@ export async function getInterventions(token: string): Promise<Intervention[]> {
 
     if (!response.ok) {
       if (response.status === 401) {
-        let errorData;
+        let errorData: { message?: string };
         try {
-          errorData = await response.json();
+          errorData = await response.json() as { message?: string };
         } catch {
           errorData = { message: 'Unauthorized' };
         }
@@ -540,13 +546,56 @@ export async function getInterventions(token: string): Promise<Intervention[]> {
       throw new Error('Failed to fetch interventions');
     }
 
-    const data = await response.json();
+    const data = await response.json() as { interventions?: Intervention[] };
     return (data.interventions || []) as Intervention[];
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       throw error;
     }
     console.error('Get interventions error:', error);
+    throw error;
+  }
+}
+
+export async function getNameExtensions(token: string): Promise<NameExtension[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/name-extensions`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        let errorData: { message?: string };
+        try {
+          errorData = await response.json() as { message?: string };
+        } catch {
+          errorData = { message: 'Unauthorized' };
+        }
+
+        const errorMessage = errorData.message || '';
+        if (
+          errorMessage.toLowerCase().includes('token') ||
+          errorMessage.toLowerCase().includes('logged in') ||
+          errorMessage.toLowerCase().includes('another device')
+        ) {
+          throw new Error('TOKEN_INVALIDATED');
+        }
+      }
+      throw new Error('Failed to fetch name extensions');
+    }
+
+    const data = await response.json() as { name_extensions?: NameExtension[]; data?: NameExtension[] };
+    return (data.name_extensions || data.data || []) as NameExtension[];
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      throw error;
+    }
+    console.error('Get name extensions error:', error);
     throw error;
   }
 }

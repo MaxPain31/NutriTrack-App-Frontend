@@ -56,6 +56,7 @@ export default function ChildListScreen() {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [currentView, setCurrentView] = useState('Weight for Height');
   const [currentPage, setCurrentPage] = useState(1);
+  const [goToValue, setGoToValue] = useState('1');
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [totalItems, setTotalItems] = useState(0);
   const [isLoadingChildren, setIsLoadingChildren] = useState(false);
@@ -74,6 +75,11 @@ export default function ChildListScreen() {
       router.replace('/login' as any);
     }
   }, [isAuthenticated, isLoading]);
+
+  // Keep Go To field in sync with current page
+  useEffect(() => {
+    setGoToValue(currentPage.toString());
+  }, [currentPage]);
 
   // Debounce search query to avoid API spamming
   useEffect(() => {
@@ -119,12 +125,20 @@ export default function ChildListScreen() {
 
       // Map API response to component format
       const mappedChildren: Child[] = response.children.map((child: ChildData) => {
-        // Format full name
+        // Format full name with extension
         const middleInitial = child.child_middle_name
           ? `${child.child_middle_name.charAt(0).toUpperCase()}. `
           : '';
-        const fullName = `${child.child_first_name} ${middleInitial}${child.child_last_name}`;
-        const displayName = toTitleCase(fullName);
+        const rawNameExtension = (child as any).name_extension;
+        const nameExtensionLabel =
+          (rawNameExtension && rawNameExtension.name_extension) ||
+          (child as any)?.name_extension_name ||
+          null;
+        // Apply toTitleCase only to name parts, preserve extension case
+        const firstName = toTitleCase(child.child_first_name);
+        const lastName = toTitleCase(child.child_last_name);
+        const fullName = `${firstName} ${middleInitial}${lastName}${nameExtensionLabel ? ` ${nameExtensionLabel}` : ''}`;
+        const displayName = fullName;
 
         // Sex and address
         const sex = child.sex?.sex || '';
@@ -159,9 +173,9 @@ export default function ChildListScreen() {
           birthdate: child.child_birthdate,
           height: parseFloat(child.height) || 0,
           weight: parseFloat(child.weight) || 0,
-          weightForHeight: child.wfh?.wfh_status || 'Unknown',
-          weightForAge: child.wfa?.wfa_status || 'Unknown',
-          heightForAge: child.hfa?.hfa_status || 'Unknown',
+          weightForHeight: normalizeStatus(child.wfh?.wfh_status),
+          weightForAge: normalizeStatus(child.wfa?.wfa_status),
+          heightForAge: normalizeStatus(child.hfa?.hfa_status),
           sex,
           address,
           updated: child.child_updated_at || undefined,
@@ -211,6 +225,12 @@ export default function ChildListScreen() {
     }
   };
 
+  const normalizeStatus = (status?: string | null) => {
+    const trimmed = (status || '').trim();
+    if (!trimmed) return 'Unknown';
+    return trimmed.toLowerCase() === 'error' ? 'Out of Range' : trimmed;
+  };
+
   const handleSelectAll = () => {
     if (selectedChildren.size === children.length) {
       setSelectedChildren(new Set());
@@ -237,7 +257,7 @@ export default function ChildListScreen() {
       case 'Stunted':
       case 'Severely Stunted':
         return '#EF4444';
-      case 'Error':
+      case 'Out of Range':
         return '#6B7280';
       default:
         return '#6B7280';
@@ -398,7 +418,7 @@ export default function ChildListScreen() {
             <ScrollView style={styles.scrollArea}>
               {/* Banner */}
               <LinearGradient
-                colors={["#A8B5FF", "#E879F9"]}
+                colors={["#4FC6D3", "#7B66F5"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.banner}
@@ -724,12 +744,36 @@ export default function ChildListScreen() {
                       <View style={styles.goToInput}>
                         <TextInput
                           style={styles.goToInputText}
-                          value={currentPage.toString()}
+                          value={goToValue}
                           keyboardType="numeric"
-                          onChangeText={(text) => {
-                            const page = parseInt(text);
-                            if (page >= 1 && page <= totalPages) {
-                              setCurrentPage(page);
+                          onChangeText={text => {
+                            const sanitized = text.replace(/[^0-9]/g, '');
+                            setGoToValue(sanitized);
+                          }}
+                          onSubmitEditing={() => {
+                            const page = parseInt(goToValue, 10);
+                            if (!Number.isNaN(page)) {
+                              const clamped = Math.min(
+                                Math.max(page, 1),
+                                Math.max(totalPages, 1),
+                              );
+                              setCurrentPage(clamped);
+                              setGoToValue(clamped.toString());
+                            } else {
+                              setGoToValue(currentPage.toString());
+                            }
+                          }}
+                          onBlur={() => {
+                            const page = parseInt(goToValue, 10);
+                            if (!Number.isNaN(page)) {
+                              const clamped = Math.min(
+                                Math.max(page, 1),
+                                Math.max(totalPages, 1),
+                              );
+                              setCurrentPage(clamped);
+                              setGoToValue(clamped.toString());
+                            } else {
+                              setGoToValue(currentPage.toString());
                             }
                           }}
                         />

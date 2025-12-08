@@ -1,7 +1,8 @@
 import { useAuth } from '@/contexts/AuthContext';
-import { API_BASE_URL, getHealthConditions, getInterventions, HealthCondition, Intervention } from '@/lib/api';
+import { API_BASE_URL, ChildData, getChildById, getHealthConditions, getInterventions, HealthCondition, Intervention } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -50,6 +51,7 @@ export default function UpdateChildScreen() {
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [statusModalTitle, setStatusModalTitle] = useState<'Success' | 'Error'>('Success');
   const [statusModalMessage, setStatusModalMessage] = useState('');
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
 
   type FieldErrorKey = 'date' | 'weight' | 'height';
   const [errors, setErrors] = useState<Partial<Record<FieldErrorKey, string>>>({});
@@ -61,6 +63,28 @@ export default function UpdateChildScreen() {
         return;
       }
       try {
+        // Load child data to get profile image URL
+        if (childId) {
+          try {
+            const childData: ChildData = await getChildById(token, childId);
+            const imagePath = childData.image_path || '';
+            const imageUrl = (childData as any).image_url || null;
+            
+            // Check if image_path contains "default" or is null/empty
+            const isDefaultImage = !imagePath || imagePath.toLowerCase().includes('default');
+            
+            if (isDefaultImage) {
+              setProfileImageUrl(null);
+              console.log('Image is default or null, showing default icon');
+            } else {
+              setProfileImageUrl(imageUrl);
+              console.log('Loaded profile image URL for update:', imageUrl);
+            }
+          } catch (error) {
+            console.error('Error loading child data for profile image:', error);
+          }
+        }
+
         const [hc, iv] = await Promise.all([
           getHealthConditions(token),
           getInterventions(token),
@@ -280,18 +304,34 @@ export default function UpdateChildScreen() {
             contentContainerStyle={styles.scrollContent}>
             {/* Gradient Banner */}
             <LinearGradient
-              colors={['#60A5FA', '#A855F7']}
+              colors={['#4FC6D3', '#7B66F5']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.banner}>
               <View style={styles.bannerAvatar}>
-                <LinearGradient
-                  colors={['#60A5FA', '#A855F7']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.avatarCircle}>
-                  <Ionicons name="person" size={24} color="#FFFFFF" />
-                </LinearGradient>
+                {profileImageUrl ? (
+                  <Image 
+                    source={{ 
+                      uri: profileImageUrl,
+                      headers: token ? {
+                        'Authorization': `Bearer ${token}`,
+                      } : undefined,
+                    }} 
+                    style={styles.avatarCircle}
+                    contentFit="cover"
+                    onError={(error) => {
+                      console.error('Error loading profile image:', error);
+                    }}
+                  />
+                ) : (
+                  <LinearGradient
+                    colors={['#4FC6D3', '#7B66F5']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.avatarCircle}>
+                    <Ionicons name="person" size={24} color="#FFFFFF" />
+                  </LinearGradient>
+                )}
               </View>
               <Text style={styles.bannerName}>{childName}</Text>
             </LinearGradient>
@@ -682,7 +722,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 16,
+    paddingBottom: 24,
   },
   banner: {
     flexDirection: 'row',
@@ -697,8 +737,9 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   avatarCircle: {
-    width: 50,
-    height: 50,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     borderRadius: 25,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
@@ -711,43 +752,43 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   formContainer: {
-    paddingHorizontal: 16,
-    marginTop: 24,
-    gap: 20,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 24,
   },
   fieldGroup: {
-    marginBottom: 4,
+    marginBottom: 12,
   },
   fieldLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
-    color: '#374151',
-    marginBottom: 8,
+    color: '#6B7280',
+    marginBottom: 4,
   },
   iconInput: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottomWidth: 1,
-    borderBottomColor: '#D1D5DB',
-    paddingVertical: 12,
+    borderBottomColor: '#E5E7EB',
+    paddingVertical: 8,
     paddingRight: 8,
   },
   iconInputText: {
-    fontSize: 16,
-    color: '#111827',
     flex: 1,
+    fontSize: 14,
+    color: '#111827',
   },
   numberInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: '#D1D5DB',
-    paddingVertical: 12,
+    borderBottomColor: '#E5E7EB',
+    paddingVertical: 8,
   },
   numberInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 14,
     color: '#111827',
     paddingRight: 8,
   },
@@ -756,17 +797,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottomWidth: 1,
-    borderBottomColor: '#D1D5DB',
-    paddingVertical: 12,
+    borderBottomColor: '#E5E7EB',
+    paddingVertical: 8,
     paddingRight: 8,
   },
   dropdownValue: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#111827',
     flex: 1,
   },
   dropdownPlaceholder: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#9CA3AF',
     flex: 1,
   },

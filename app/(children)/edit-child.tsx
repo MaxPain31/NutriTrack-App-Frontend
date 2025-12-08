@@ -1,7 +1,10 @@
 import { useAuth } from '@/contexts/AuthContext';
-import { API_BASE_URL, HealthCondition, getHealthConditions } from '@/lib/api';
+import { API_BASE_URL, ChildData, getChildById, getHealthConditions, getNameExtensions, HealthCondition, NameExtension } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as FileSystem from 'expo-file-system/legacy';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -45,7 +48,13 @@ export default function EditChildScreen() {
   const [firstName, setFirstName] = useState((params.firstName as string) || '');
   const [middleName, setMiddleName] = useState((params.middleName as string) || '');
   const [lastName, setLastName] = useState((params.lastName as string) || '');
+  const [nameExtensions, setNameExtensions] = useState<NameExtension[]>([]);
   const [nameExtension, setNameExtension] = useState((params.nameExtension as string) || '');
+  const [nameExtensionId, setNameExtensionId] = useState<number | null>(null);
+  const [nameExtensionLabel, setNameExtensionLabel] = useState('');
+  const [nameExtensionOther, setNameExtensionOther] = useState('');
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [birthdate, setBirthdate] = useState<Date | null>(
     params.birthdate ? new Date(params.birthdate as string) : null,
   );
@@ -70,6 +79,7 @@ export default function EditChildScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isHealthModalVisible, setIsHealthModalVisible] = useState(false);
+  const [isNameExtModalVisible, setIsNameExtModalVisible] = useState(false);
   const [confirmationModalVisible, setConfirmationModalVisible] = useState(false);
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [statusModalTitle, setStatusModalTitle] = useState<'Success' | 'Error'>('Success');
@@ -79,15 +89,41 @@ export default function EditChildScreen() {
   const [errors, setErrors] = useState<Partial<Record<FieldErrorKey, string>>>({});
 
   useEffect(() => {
-    const loadHealthConditions = async () => {
+    const loadData = async () => {
       if (!token || !isAuthenticated) {
         setIsLoading(false);
         return;
       }
 
       try {
-        const healthList = await getHealthConditions(token);
+        // Load child data to get profile image URL
+        if (childId) {
+          try {
+            const childData: ChildData = await getChildById(token, childId);
+            const imagePath = childData.image_path || '';
+            const imageUrl = (childData as any).image_url || null;
+            
+            // Check if image_path contains "default" or is null/empty
+            const isDefaultImage = !imagePath || imagePath.toLowerCase().includes('default');
+            
+            if (isDefaultImage) {
+              setProfileImageUrl(null);
+              console.log('Image is default or null, showing default icon');
+            } else {
+              setProfileImageUrl(imageUrl);
+              console.log('Loaded profile image URL:', imageUrl);
+            }
+          } catch (error) {
+            console.error('Error loading child data for profile image:', error);
+          }
+        }
+
+        const [healthList, extList] = await Promise.all([
+          getHealthConditions(token),
+          getNameExtensions(token),
+        ]);
         setHealthConditions(healthList);
+        setNameExtensions(extList);
 
         // Preselect based on names passed from child-details (comma-separated)
         const conditionNames =
@@ -113,8 +149,56 @@ export default function EditChildScreen() {
       }
     };
 
-    loadHealthConditions();
-  }, [token, isAuthenticated, handleTokenInvalidation, params.healthCondition]);
+    loadData();
+  }, [token, isAuthenticated, handleTokenInvalidation, params.healthCondition, childId]);
+
+  // Initialize name extension option vs other text
+  useEffect(() => {
+    if (!nameExtension) return;
+    if (!Array.isArray(nameExtensions) || nameExtensions.length === 0) return;
+
+    const trimmed = String(nameExtension).trim();
+    const numericId = Number(trimmed);
+
+    let match: NameExtension | undefined;
+    if (!Number.isNaN(numericId)) {
+      match = nameExtensions.find(ext => ext.name_extension_id === numericId);
+    }
+    if (!match) {
+      match = nameExtensions.find(
+        ext => ext.name_extension.toLowerCase() === trimmed.toLowerCase(),
+      );
+    }
+
+    if (match) {
+      setNameExtensionId(match.name_extension_id);
+      setNameExtensionLabel(match.name_extension);
+      setNameExtensionOther('');
+    } else {
+      setNameExtensionId(null);
+      setNameExtensionLabel('Other');
+      setNameExtensionOther(trimmed);
+    }
+  }, [nameExtension, nameExtensions]);
+
+  const handlePickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+    });
+    if (!result.canceled && result.assets?.length) {
+      const asset = result.assets[0];
+      setImageUri(asset.uri);
+      const fileName = asset.uri.split('/').pop() || `child_${Date.now()}.jpg`;
+      const extension = fileName.split('.').pop()?.toLowerCase();
+      const mimeType =
+        extension === 'png'
+          ? 'image/png'
+          : extension === 'jpg' || extension === 'jpeg'
+            ? 'image/jpeg'
+            : 'image/jpeg';
+    }
+  };
 
   const handleCancel = () => {
     router.back();
@@ -159,28 +243,91 @@ export default function EditChildScreen() {
 
     const sex_id = sex === 'Male' ? 1 : sex === 'Female' ? 2 : null;
 
-    const payload = {
-      child_first_name: firstName,
-      child_middle_name: middleName || null,
-      child_last_name: lastName,
-      name_extension_id: nameExtension || null,
-      child_birthdate: (birthdate as Date).toISOString().split('T')[0],
-      weight,
-      height,
-      sex_id,
-      health_condition_ids: selectedHealthConditionIds,
-      municipality_id: user?.profile?.municipality_id ?? null,
-      barangay_id: user?.profile?.barangay_id ?? null,
-      updated_by: user?.user_id ?? null,
-      caregiver_first_name: caregiverFirstName,
-      caregiver_middle_name: caregiverMiddleName,
-      caregiver_last_name: caregiverLastName,
-    };
+    const formData = new FormData();
+    formData.append('child_first_name', firstName);
+    formData.append('child_middle_name', middleName || '');
+    formData.append('child_last_name', lastName);
+    if (nameExtensionId !== null) {
+      formData.append('name_extension_id', String(nameExtensionId));
+    } else if (nameExtensionLabel === 'Other' && nameExtensionOther.trim()) {
+      formData.append('name_extension_name', nameExtensionOther.trim());
+    } else {
+      formData.append('name_extension_id', '');
+    }
+    formData.append('child_birthdate', (birthdate as Date).toISOString().split('T')[0]);
+    formData.append('weight', weight);
+    formData.append('height', height);
+    if (sex_id !== null) formData.append('sex_id', String(sex_id));
+    selectedHealthConditionIds.forEach(id =>
+      formData.append('health_condition_ids[]', String(id)),
+    );
+    formData.append(
+      'municipality_id',
+      user?.profile?.municipality_id ? String(user.profile.municipality_id) : '',
+    );
+    formData.append(
+      'barangay_id',
+      user?.profile?.barangay_id ? String(user.profile.barangay_id) : '',
+    );
+    formData.append('updated_by', user?.user_id ? String(user.user_id) : '');
+    formData.append('caregiver_first_name', caregiverFirstName);
+    formData.append('caregiver_middle_name', caregiverMiddleName);
+    formData.append('caregiver_last_name', caregiverLastName);
+    if (imageUri) {
+      const fileName = imageUri.split('/').pop() || `child_${Date.now()}.jpg`;
+      const extension = fileName.split('.').pop()?.toLowerCase();
+      const mimeType = extension === 'png' ? 'image/png' : 'image/jpeg';
+      
+      // Convert image to base64 as workaround for React Native FormData bug
+      try {
+        console.log('Converting image to base64, URI:', imageUri);
+        let base64: string;
+        
+        if (Platform.OS === 'web') {
+          // Web platform: use fetch and FileReader
+          const response = await fetch(imageUri);
+          const blob = await response.blob();
+          base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const result = reader.result as string;
+              // Remove data URL prefix (e.g., "data:image/jpeg;base64,")
+              const base64Data = result.split(',')[1];
+              resolve(base64Data);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } else {
+          // Native platform: use expo-file-system
+          base64 = await FileSystem.readAsStringAsync(imageUri, {
+            encoding: 'base64' as any,
+          });
+        }
+        
+        console.log('Image converted to base64, length:', base64.length);
+        console.log('Base64 first 50 chars:', base64.substring(0, 50));
+        console.log('Base64 type:', typeof base64);
+        
+        // Send base64 as profile_image field - backend should detect and handle base64
+        // Ensure it's a string and append directly
+        const base64String = String(base64);
+        console.log('Base64String type after String():', typeof base64String);
+        formData.append('profile_image', base64String);
+        formData.append('profile_image_name', fileName);
+        formData.append('profile_image_type', mimeType);
+        formData.append('profile_image_is_base64', 'true');
+      } catch (error) {
+        console.error('Error converting image to base64:', error);
+        // Don't send fallback - let backend know image upload failed
+        formData.append('profile_image_error', 'Failed to convert image to base64');
+      }
+    }
 
     setIsSaving(true);
 
     if (!token || !isAuthenticated) {
-      console.log('Submitting child edit (no token, test only):', payload);
+      console.log('Submitting child edit (no token, test only): formData prepared');
       setStatusModalTitle('Success');
       setStatusModalMessage('Edit payload logged to console (test only).');
       setStatusModalVisible(true);
@@ -189,30 +336,52 @@ export default function EditChildScreen() {
     }
 
     try {
+      // Log FormData contents for debugging
+      console.log('FormData contents:');
+      const formDataEntries: any[] = [];
+      (formData as any)._parts?.forEach((part: any) => {
+        if (Array.isArray(part) && part.length >= 2) {
+          const [key, value] = part;
+          if (key === 'profile_image') {
+            console.log('profile_image value type:', typeof value);
+            console.log('profile_image value is string:', typeof value === 'string');
+            console.log('profile_image value length:', typeof value === 'string' ? value.length : 'N/A');
+            if (typeof value === 'string' && value.length > 100) {
+              formDataEntries.push([key, `[base64 string, length: ${value.length}, first 50: ${value.substring(0, 50)}]`]);
+            } else {
+              formDataEntries.push([key, `[${typeof value}: ${JSON.stringify(value).substring(0, 100)}]`]);
+            }
+          } else {
+            formDataEntries.push([key, typeof value === 'object' ? JSON.stringify(value) : value]);
+          }
+        }
+      });
+      console.log('FormData entries:', formDataEntries);
+      
+      // Use fetch with FormData - base64 strings work fine with fetch
       const response = await fetch(`${API_BASE_URL}/api/children/${childId}`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
           Accept: 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(payload),
+        body: formData as any,
       });
 
-      const data = await response.json() as { errors?: Record<string, string[]>; message?: string };
-      console.log('Update child API response:', data);
+      const responseData = await response.json() as { errors?: Record<string, string[]>; message?: string };
+      console.log('Update child API response:', responseData);
 
       if (!response.ok) {
         let message = 'Failed to update child.';
-        if (data && data.errors) {
-          const firstKey = Object.keys(data.errors)[0];
-          const firstMsgArr = data.errors[firstKey];
+        if (responseData && responseData.errors) {
+          const firstKey = Object.keys(responseData.errors)[0];
+          const firstMsgArr = responseData.errors[firstKey];
           message =
             Array.isArray(firstMsgArr) && firstMsgArr.length > 0
               ? firstMsgArr[0]
-              : data.message || 'Validation failed.';
-        } else if (data && data.message) {
-          message = data.message;
+              : responseData.message || 'Validation failed.';
+        } else if (responseData && responseData.message) {
+          message = responseData.message;
         }
         setStatusModalTitle('Error');
         setStatusModalMessage(message);
@@ -263,15 +432,19 @@ export default function EditChildScreen() {
     onChangeText: (text: string) => void,
     fieldKey?: FieldErrorKey,
     props: any = {},
+    required?: boolean,
   ) => (
     <View style={styles.fieldGroup}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldLabel}>
+        {label}
+        {required ? <Text style={styles.requiredAsterisk}> *</Text> : null}
+      </Text>
       <TextInput
         style={[
           styles.fieldInput,
           fieldKey && errors[fieldKey] && styles.fieldInputError,
         ]}
-        placeholder={label}
+        placeholder={props.placeholder || label}
         placeholderTextColor="#9CA3AF"
         value={value}
         onChangeText={text => {
@@ -328,23 +501,52 @@ export default function EditChildScreen() {
           </View>
 
           {/* Gradient avatar area */}
-          <LinearGradient
-            colors={["#60A5FA", "#A855F7"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.banner}
-          >
-            <View style={styles.avatarCircle}>
-              <LinearGradient
-                colors={["#60A5FA", "#A855F7"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.avatarInner}
-              >
-                <Ionicons name="person" size={40} color="#FFFFFF" />
-              </LinearGradient>
-            </View>
-          </LinearGradient>
+            <LinearGradient
+              colors={["#4FC6D3", "#7B66F5"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.banner}
+            >
+             <View style={styles.avatarContainer}>
+               <TouchableOpacity
+                 activeOpacity={0.8}
+                 style={styles.avatarCircle}
+                 onPress={handlePickImage}
+               >
+                 {imageUri ? (
+                   <Image 
+                     source={{ uri: imageUri }} 
+                     style={styles.avatarInnerImage}
+                     contentFit="cover"
+                   />
+                 ) : profileImageUrl ? (
+                   <Image 
+                     source={{ 
+                       uri: profileImageUrl,
+                       headers: token ? {
+                         'Authorization': `Bearer ${token}`,
+                       } : undefined,
+                     }} 
+                     style={styles.avatarInnerImage}
+                     contentFit="cover"
+                     onError={(error) => {
+                       console.error('Error loading profile image:', error);
+                     }}
+                   />
+                 ) : (
+                   <LinearGradient
+                     colors={["#4FC6D3", "#7B66F5"]}
+                     start={{ x: 0, y: 0 }}
+                     end={{ x: 1, y: 1 }}
+                     style={styles.avatarInner}
+                   >
+                     <Ionicons name="person" size={40} color="#FFFFFF" />
+                   </LinearGradient>
+                 )}
+               </TouchableOpacity>
+               <Text style={styles.uploadHint}>Tap to upload child photo</Text>
+             </View>
+            </LinearGradient>
 
           {/* Form */}
           <ScrollView
@@ -352,19 +554,60 @@ export default function EditChildScreen() {
             contentContainerStyle={styles.formContent}
             keyboardShouldPersistTaps="handled"
           >
+            <Text style={styles.sectionTitle}>Child Information</Text>
             {renderTextField(
               "First Name",
               firstName,
               setFirstName,
-              "firstName"
+              "firstName",
+              { placeholder: "e.g., Juan" },
+              true
             )}
-            {renderTextField("Middle Name", middleName, setMiddleName)}
-            {renderTextField("Last Name", lastName, setLastName, "lastName")}
-            {renderTextField("Name Extension", nameExtension, setNameExtension)}
+            {renderTextField("Middle Name", middleName, setMiddleName, undefined, {
+              placeholder: "e.g., Santos",
+            })}
+            {renderTextField("Last Name", lastName, setLastName, "lastName", {
+              placeholder: "e.g., Dela Cruz",
+            }, true)}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>Name Extension</Text>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={styles.dropdownInput}
+                onPress={() => setIsNameExtModalVisible(true)}>
+                <Text
+                  style={
+                    nameExtensionId || nameExtensionLabel || nameExtensionOther
+                      ? styles.dropdownValue
+                      : styles.dropdownPlaceholder
+                  }>
+                  {nameExtensionId
+                    ? nameExtensionLabel
+                    : nameExtensionOther
+                      ? `Other: ${nameExtensionOther}`
+                      : 'Select extension (optional)'}
+                </Text>
+                <Ionicons name="chevron-down" size={18} color="#9CA3AF" />
+              </TouchableOpacity>
+              {nameExtensionLabel === 'Other' && (
+                <TextInput
+                  style={[styles.fieldInput, { marginTop: 8 }]}
+                  placeholder="Enter other extension (e.g., Jr., Sr., II)"
+                  placeholderTextColor="#9CA3AF"
+                  value={nameExtensionOther}
+                  onChangeText={text => {
+                    setNameExtensionOther(text);
+                    setNameExtension(text);
+                  }}
+                />
+              )}
+            </View>
 
             {/* Birthdate */}
             <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Birthdate</Text>
+              <Text style={styles.fieldLabel}>
+                Birthdate<Text style={styles.requiredAsterisk}> *</Text>
+              </Text>
               <TouchableOpacity
                 activeOpacity={0.8}
                 style={[
@@ -403,9 +646,61 @@ export default function EditChildScreen() {
               )}
             </View>
 
+            {/* Sex selector (radio) */}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>
+                Sex<Text style={styles.requiredAsterisk}> *</Text>
+              </Text>
+              <View style={styles.radioRow}>
+                {(["Male", "Female"] as const).map((option) => {
+                  const selected = sex === option;
+                  return (
+                    <TouchableOpacity
+                      key={option}
+                      style={styles.radioOption}
+                      onPress={() => {
+                        setErrors((prev) => ({ ...prev, sex: undefined }));
+                        setSex(option);
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <View style={[styles.radioOuter, selected && styles.radioOuterActive]}>
+                        {selected && <View style={styles.radioInner} />}
+                      </View>
+                      <Text style={styles.radioLabel}>{option}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {errors.sex && <Text style={styles.errorText}>{errors.sex}</Text>}
+            </View>
+
+            {/* Municipality (read-only) */}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>Municipality</Text>
+              <View style={styles.readonlyInput}>
+                <Text style={styles.readonlyText}>
+                  {(params.municipalityName as string) || "—"}
+                </Text>
+              </View>
+            </View>
+
+            {/* Barangay (read-only) */}
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>Barangay</Text>
+              <View style={styles.readonlyInput}>
+                <Text style={styles.readonlyText}>
+                  {(params.barangayName as string) || "—"}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={styles.sectionTitle}>Current Vital</Text>
             {/* Weight Field */}
             <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Weight (kg)</Text>
+              <Text style={styles.fieldLabel}>
+                Weight (kg)<Text style={styles.requiredAsterisk}> *</Text>
+              </Text>
               <View
                 style={[
                   styles.numberInputContainer,
@@ -414,7 +709,7 @@ export default function EditChildScreen() {
               >
                 <TextInput
                   style={styles.numberInput}
-                  placeholder="0.0"
+                  placeholder="e.g., 12.5"
                   placeholderTextColor="#9CA3AF"
                   value={weight}
                   onChangeText={(text) => {
@@ -431,7 +726,9 @@ export default function EditChildScreen() {
 
             {/* Height Field */}
             <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Height (cm)</Text>
+              <Text style={styles.fieldLabel}>
+                Height (cm)<Text style={styles.requiredAsterisk}> *</Text>
+              </Text>
               <View
                 style={[
                   styles.numberInputContainer,
@@ -440,7 +737,7 @@ export default function EditChildScreen() {
               >
                 <TextInput
                   style={styles.numberInput}
-                  placeholder="0"
+                  placeholder="e.g., 95"
                   placeholderTextColor="#9CA3AF"
                   value={height}
                   onChangeText={(text) => {
@@ -455,36 +752,30 @@ export default function EditChildScreen() {
               )}
             </View>
 
-            {/* Sex selector */}
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Sex</Text>
-              <View style={styles.sexRow}>
-                {(["Male", "Female"] as const).map((option) => (
-                  <TouchableOpacity
-                    key={option}
-                    style={[
-                      styles.sexOption,
-                      sex === option && styles.sexOptionActive,
-                    ]}
-                    onPress={() => {
-                      setErrors((prev) => ({ ...prev, sex: undefined }));
-                      setSex(option);
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.sexOptionText,
-                        sex === option && styles.sexOptionTextActive,
-                      ]}
-                    >
-                      {option}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              {errors.sex && <Text style={styles.errorText}>{errors.sex}</Text>}
-            </View>
+            <Text style={styles.sectionTitle}>Caregiver Information</Text>
+            {renderTextField(
+              'First Name',
+              caregiverFirstName,
+              setCaregiverFirstName,
+              undefined,
+              { placeholder: "e.g., Maria" },
+            )}
+            {renderTextField(
+              'Middle Name',
+              caregiverMiddleName,
+              setCaregiverMiddleName,
+              undefined,
+              { placeholder: "e.g., Reyes" },
+            )}
+            {renderTextField(
+              'Last Name',
+              caregiverLastName,
+              setCaregiverLastName,
+              undefined,
+              { placeholder: "e.g., Santos" },
+            )}
 
+            <Text style={styles.sectionTitle}>Health Data</Text>
             {/* Health Conditions (multi-select from API) */}
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldLabel}>Health Conditions</Text>
@@ -509,48 +800,11 @@ export default function EditChildScreen() {
                         )
                         .map((hc) => hc.condition_name)
                         .join(", ")
-                    : "Select health conditions"}
+                    : "Select health conditions (multi-select)"}
                 </Text>
                 <Ionicons name="chevron-down" size={18} color="#9CA3AF" />
               </TouchableOpacity>
             </View>
-
-            {/* Municipality (read-only) */}
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Municipality</Text>
-              <View style={styles.readonlyInput}>
-                <Text style={styles.readonlyText}>
-                  {(params.municipalityName as string) || "—"}
-                </Text>
-              </View>
-            </View>
-
-            {/* Barangay (read-only) */}
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Barangay</Text>
-              <View style={styles.readonlyInput}>
-                <Text style={styles.readonlyText}>
-                  {(params.barangayName as string) || "—"}
-                </Text>
-              </View>
-            </View>
-
-            {/* Caregiver Name - First, Middle, Last, Extension */}
-            {renderTextField(
-              'Caregiver First Name',
-              caregiverFirstName,
-              setCaregiverFirstName,
-            )}
-            {renderTextField(
-              'Caregiver Middle Name',
-              caregiverMiddleName,
-              setCaregiverMiddleName,
-            )}
-            {renderTextField(
-              'Caregiver Last Name',
-              caregiverLastName,
-              setCaregiverLastName,
-            )}
           </ScrollView>
 
           {/* Buttons */}
@@ -629,6 +883,73 @@ export default function EditChildScreen() {
                   <TouchableOpacity
                     style={styles.modalCancelButton}
                     onPress={() => setIsHealthModalVisible(false)}
+                  >
+                    <Text style={styles.modalCancelText}>Close</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Name Extension Modal */}
+          <Modal
+            visible={isNameExtModalVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setIsNameExtModalVisible(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Select Extension</Text>
+                <ScrollView style={styles.modalList}>
+                  {nameExtensions.map(option => {
+                    const isSelected = nameExtensionId === option.name_extension_id;
+                    return (
+                      <TouchableOpacity
+                        key={option.name_extension_id}
+                        style={styles.modalOption}
+                        onPress={() => {
+                          setNameExtensionId(option.name_extension_id);
+                          setNameExtensionLabel(option.name_extension);
+                          setNameExtensionOther('');
+                          setIsNameExtModalVisible(false);
+                        }}>
+                        <View
+                          style={[
+                            styles.checkbox,
+                            isSelected && styles.checkboxSelected,
+                          ]}>
+                          {isSelected && (
+                            <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                          )}
+                        </View>
+                        <Text style={styles.modalOptionText}>{option.name_extension}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  <TouchableOpacity
+                    style={styles.modalOption}
+                    onPress={() => {
+                      setNameExtensionId(null);
+                      setNameExtensionLabel('Other');
+                      setIsNameExtModalVisible(false);
+                    }}>
+                    <View
+                      style={[
+                        styles.checkbox,
+                        nameExtensionLabel === 'Other' && styles.checkboxSelected,
+                      ]}>
+                      {nameExtensionLabel === 'Other' && (
+                        <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                      )}
+                    </View>
+                    <Text style={styles.modalOptionText}>Other</Text>
+                  </TouchableOpacity>
+                </ScrollView>
+                <View style={styles.modalFooter}>
+                  <TouchableOpacity
+                    style={styles.modalCancelButton}
+                    onPress={() => setIsNameExtModalVisible(false)}
                   >
                     <Text style={styles.modalCancelText}>Close</Text>
                   </TouchableOpacity>
@@ -760,6 +1081,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatarInnerImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    resizeMode: 'cover',
+  },
+  avatarContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uploadHint: {
+    fontSize: 12,
+    color: '#FFFFFF',
+    marginTop: 8,
+    opacity: 0.9,
+    textAlign: 'center',
+  },
   formScroll: {
     flex: 1,
   },
@@ -767,6 +1105,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+    marginTop: 8,
+    marginBottom: 8,
   },
   fieldGroup: {
     marginBottom: 12,
@@ -848,6 +1193,10 @@ const styles = StyleSheet.create({
     color: '#111827',
     flex: 1,
   },
+  requiredAsterisk: {
+    color: '#DC2626',
+    fontWeight: '700',
+  },
   sexRow: {
     flexDirection: 'row',
     gap: 12,
@@ -873,6 +1222,40 @@ const styles = StyleSheet.create({
   sexOptionTextActive: {
     color: '#4C1D95',
     fontWeight: '600',
+  },
+  radioRow: {
+    flexDirection: 'row',
+    gap: 16,
+    marginTop: 4,
+  },
+  radioOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  radioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#9CA3AF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  radioOuterActive: {
+    borderColor: '#8B5CF6',
+  },
+  radioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#8B5CF6',
+  },
+  radioLabel: {
+    fontSize: 14,
+    color: '#111827',
+    fontWeight: '500',
   },
   footerButtons: {
     flexDirection: 'row',
