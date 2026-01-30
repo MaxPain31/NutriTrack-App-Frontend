@@ -132,7 +132,11 @@ export default function UpdateChildScreen() {
   }, [token, isAuthenticated, handleTokenInvalidation, params.healthCondition, params.interventions]);
 
   const handleCancel = () => {
-    router.back();
+    // Navigate to child-details with childId - this will reload the page
+    router.replace({
+      pathname: '/(children)/child-details',
+      params: { id: childId },
+    } as any);
   };
 
   const handleSaveClick = () => {
@@ -270,7 +274,7 @@ export default function UpdateChildScreen() {
                 style={styles.headerBack}>
                 <Ionicons name="chevron-back" size={22} color="#111827" />
               </TouchableOpacity>
-              <Text style={styles.headerTitle}>Update Child Progress</Text>
+              <Text style={styles.headerTitle}>Add Child Progress</Text>
               <View style={styles.headerRightSpacer} />
             </View>
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -384,6 +388,7 @@ export default function UpdateChildScreen() {
                     placeholder="0.0"
                     placeholderTextColor="#9CA3AF"
                     value={weight}
+                    onFocus={() => setWeight('')}
                     onChangeText={text => {
                       setErrors(prev => ({ ...prev, weight: undefined }));
                       setWeight(text);
@@ -409,6 +414,7 @@ export default function UpdateChildScreen() {
                     placeholder="0"
                     placeholderTextColor="#9CA3AF"
                     value={height}
+                    onFocus={() => setHeight('')}
                     onChangeText={text => {
                       setErrors(prev => ({ ...prev, height: undefined }));
                       setHeight(text);
@@ -493,7 +499,7 @@ export default function UpdateChildScreen() {
               {isSaving ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.saveButtonText}>Save</Text>
+                <Text style={styles.saveButtonText}>Update</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -624,9 +630,9 @@ export default function UpdateChildScreen() {
             onRequestClose={() => setConfirmationModalVisible(false)}>
             <View style={styles.modalOverlay}>
               <View style={styles.confirmationModalContent}>
-                <Text style={styles.confirmationModalTitle}>Confirm Save</Text>
+                <Text style={styles.confirmationModalTitle}>Confirm to Update</Text>
                 <Text style={styles.confirmationModalMessage}>
-                  Are you sure you want to save these changes?
+                  Are you sure you want to update this child progress?
                 </Text>
                 <View style={styles.confirmationModalButtons}>
                   <TouchableOpacity
@@ -637,7 +643,7 @@ export default function UpdateChildScreen() {
                   <TouchableOpacity
                     style={styles.confirmationModalConfirmButton}
                     onPress={handleConfirmSave}>
-                    <Text style={styles.confirmationModalConfirmText}>Save</Text>
+                    <Text style={styles.confirmationModalConfirmText}>Update</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -669,10 +675,8 @@ export default function UpdateChildScreen() {
                   onPress={() => {
                     setStatusModalVisible(false);
                     if (statusModalTitle === 'Success') {
-                      router.replace({
-                        pathname: '/(children)/child-details',
-                        params: { id: childId },
-                      } as any);
+                      // Go back to previous page (child-details) - maintains navigation stack
+                      router.back();
                     }
                   }}>
                   <Text style={styles.statusModalButtonText}>OK</Text>
@@ -740,7 +744,6 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    borderRadius: 25,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',

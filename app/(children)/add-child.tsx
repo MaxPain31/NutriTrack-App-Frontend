@@ -243,16 +243,22 @@ export default function AddChildScreen() {
         }
       });
       console.log('FormData entries:', formDataEntries);
+      console.log('Sending FormData to:', "http://72.60.236.137:8002/api/children");
       
       // Use fetch with FormData - base64 strings work fine with fetch
+      // Note: Do NOT set Content-Type header - fetch will set it automatically with boundary
       const response = await fetch("http://72.60.236.137:8002/api/children", {
         method: 'POST',
         headers: {
           Accept: 'application/json',
           Authorization: `Bearer ${token}`,
+          // Content-Type will be set automatically by fetch for FormData
         },
-        body: formData as any,
+        body: formData as any, // TypeScript workaround for React Native FormData
       });
+      
+      console.log('Response status:', response.status);
+      console.log('Response headers:', JSON.stringify(Object.fromEntries(response.headers.entries())));
 
       const responseData = await response.json() as { errors?: Record<string, string[]>; message?: string };
       console.log('Create child API response:', responseData);
@@ -731,6 +737,7 @@ export default function AddChildScreen() {
                   onPress={() => {
                     setStatusModalVisible(false);
                     if (statusModalTitle === 'Success') {
+                      // Navigate back to child-list and force reload
                       router.replace('/(children)/child-list' as any);
                     }
                   }}

@@ -2,8 +2,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { ChildData, getChildren } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -47,6 +47,7 @@ const toTitleCase = (value: string) =>
 export default function ChildListScreen() {
   const { isAuthenticated, isLoading, logout, token, handleTokenInvalidation, user } = useAuth();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ refresh?: string }>();
   
   // Child list state
   const [children, setChildren] = useState<Child[]>([]);
@@ -69,6 +70,9 @@ export default function ChildListScreen() {
   const [wfaId, setWfaId] = useState<number | undefined>(undefined);
   const [wfhId, setWfhId] = useState<number | undefined>(undefined);
   const [hfaId, setHfaId] = useState<number | undefined>(undefined);
+  const [sortBy, setSortBy] = useState<'name' | 'age'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -90,21 +94,14 @@ export default function ChildListScreen() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Reset to page 1 when search query, items per page, or filters change
+  // Reset to page 1 when search query, items per page, filters, or sorting change
   useEffect(() => {
     if (isAuthenticated && token) {
       setCurrentPage(1);
     }
-  }, [debouncedSearchQuery, itemsPerPage, wfaId, wfhId, hfaId, isAuthenticated, token]);
+  }, [debouncedSearchQuery, itemsPerPage, wfaId, wfhId, hfaId, sortBy, sortOrder, isAuthenticated, token]);
 
-  // Fetch children data from API
-  useEffect(() => {
-    if (isAuthenticated && token && user?.profile?.barangay_id) {
-      fetchChildren();
-    }
-  }, [currentPage, itemsPerPage, debouncedSearchQuery, wfaId, wfhId, hfaId, isAuthenticated, token, user?.profile?.barangay_id]);
-
-  const fetchChildren = async () => {
+  const fetchChildren = useCallback(async () => {
     if (!token || !isAuthenticated || !user?.profile?.barangay_id) {
       return;
     }
@@ -120,7 +117,9 @@ export default function ChildListScreen() {
         0,
         wfaId,
         wfhId,
-        hfaId
+        hfaId,
+        sortBy,
+        sortOrder
       );
 
       // Map API response to component format
@@ -196,7 +195,31 @@ export default function ChildListScreen() {
     } finally {
       setIsLoadingChildren(false);
     }
-  };
+  }, [token, isAuthenticated, user?.profile?.barangay_id, currentPage, itemsPerPage, debouncedSearchQuery, wfaId, wfhId, hfaId, sortBy, sortOrder, handleTokenInvalidation]);
+
+  // Fetch children data from API
+  useEffect(() => {
+    if (isAuthenticated && token && user?.profile?.barangay_id) {
+      fetchChildren();
+    }
+  }, [fetchChildren, isAuthenticated, token, user?.profile?.barangay_id]);
+
+  // Reload data when page comes into focus (e.g., when navigating back from child-details)
+  useFocusEffect(
+    useCallback(() => {
+      if (isAuthenticated && token && user?.profile?.barangay_id) {
+        // Always reload when page comes into focus, especially when navigating back
+        fetchChildren();
+      }
+    }, [fetchChildren, isAuthenticated, token, user?.profile?.barangay_id])
+  );
+
+  // Also reload when refresh parameter is present
+  useEffect(() => {
+    if (params.refresh && isAuthenticated && token && user?.profile?.barangay_id) {
+      fetchChildren();
+    }
+  }, [params.refresh, fetchChildren, isAuthenticated, token, user?.profile?.barangay_id]);
 
   // Selection handlers
   const handleLongPress = (childId: string) => {
@@ -334,7 +357,9 @@ export default function ChildListScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.layout}>
         <View style={styles.content}>
-          <View style={[styles.topHeader, { paddingTop: Math.max(insets.top, 20) }]}>
+          <View
+            style={[styles.topHeader, { paddingTop: Math.max(insets.top, 20) }]}
+          >
             <View style={styles.topHeaderLeft}>
               <View style={styles.topHeaderBrand}>
                 <Text style={styles.topHeaderBrandTextPrimary}>Nutri</Text>
@@ -464,13 +489,32 @@ export default function ChildListScreen() {
                       <Text style={styles.viewingBadgeText}>{currentView}</Text>
                     </View>
                   </View>
-                  <TouchableOpacity
-                    style={styles.filterButton}
-                    onPress={() => setIsStatusDropdownOpen(true)}
-                  >
-                    <Text style={styles.filterButtonText}>{statusFilterLabel}</Text>
-                    <Ionicons name="chevron-down" size={16} color="#9333EA" />
-                  </TouchableOpacity>
+                  <View style={styles.filterButtons}>
+                    <TouchableOpacity
+                      style={styles.filterButton}
+                      onPress={() => setIsStatusDropdownOpen(true)}
+                    >
+                      <Text style={styles.filterButtonText}>
+                        {statusFilterLabel}
+                      </Text>
+                      <Ionicons name="chevron-down" size={16} color="#9333EA" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.filterButton}
+                      onPress={() => setIsSortDropdownOpen(true)}
+                    >
+                      <Ionicons
+                        name="swap-vertical-outline"
+                        size={16}
+                        color="#9333EA"
+                      />
+                      <Text style={styles.filterButtonText}>
+                        {sortBy === "name" ? "Name" : "Age"} (
+                        {sortOrder === "asc" ? "A-Z" : "Z-A"})
+                      </Text>
+                      <Ionicons name="chevron-down" size={16} color="#9333EA" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
 
@@ -530,24 +574,30 @@ export default function ChildListScreen() {
                 onPress={() => setIsStatusDropdownOpen(false)}
               >
                 <View style={styles.statusDropdownContainer}>
-                  {statusOptions.map(option => {
-                    if (option.type === 'header') {
+                  {statusOptions.map((option) => {
+                    if (option.type === "header") {
                       return (
-                        <Text key={option.label} style={styles.statusHeaderText}>
+                        <Text
+                          key={option.label}
+                          style={styles.statusHeaderText}
+                        >
                           {option.label}
                         </Text>
                       );
                     }
                     const isSelected =
-                      option.label === 'All Status'
+                      option.label === "All Status"
                         ? !wfaId && !wfhId && !hfaId
                         : (() => {
                             const statusIds = statusIdMap[option.label];
                             if (!statusIds) return false;
                             return (
-                              (statusIds.wfaId !== undefined && statusIds.wfaId === wfaId) ||
-                              (statusIds.wfhId !== undefined && statusIds.wfhId === wfhId) ||
-                              (statusIds.hfaId !== undefined && statusIds.hfaId === hfaId)
+                              (statusIds.wfaId !== undefined &&
+                                statusIds.wfaId === wfaId) ||
+                              (statusIds.wfhId !== undefined &&
+                                statusIds.wfhId === wfhId) ||
+                              (statusIds.hfaId !== undefined &&
+                                statusIds.hfaId === hfaId)
                             );
                           })();
                     return (
@@ -574,214 +624,326 @@ export default function ChildListScreen() {
               </TouchableOpacity>
             </Modal>
 
+            {/* Sort Dropdown Modal */}
+            <Modal
+              visible={isSortDropdownOpen}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setIsSortDropdownOpen(false)}
+            >
+              <TouchableOpacity
+                style={styles.itemsPerPageOverlay}
+                activeOpacity={1}
+                onPress={() => setIsSortDropdownOpen(false)}
+              >
+                <View style={styles.statusDropdownContainer}>
+                  <Text style={styles.statusHeaderText}>Sort By</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.statusOption,
+                      sortBy === "name" &&
+                        sortOrder === "asc" &&
+                        styles.statusOptionSelected,
+                    ]}
+                    onPress={() => {
+                      setSortBy("name");
+                      setSortOrder("asc");
+                      setIsSortDropdownOpen(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.statusOptionText,
+                        sortBy === "name" &&
+                          sortOrder === "asc" &&
+                          styles.statusOptionTextSelected,
+                      ]}
+                    >
+                      Name (A-Z)
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.statusOption,
+                      sortBy === "name" &&
+                        sortOrder === "desc" &&
+                        styles.statusOptionSelected,
+                    ]}
+                    onPress={() => {
+                      setSortBy("name");
+                      setSortOrder("desc");
+                      setIsSortDropdownOpen(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.statusOptionText,
+                        sortBy === "name" &&
+                          sortOrder === "desc" &&
+                          styles.statusOptionTextSelected,
+                      ]}
+                    >
+                      Name (Z-A)
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.statusOption,
+                      sortBy === "age" &&
+                        sortOrder === "asc" &&
+                        styles.statusOptionSelected,
+                    ]}
+                    onPress={() => {
+                      setSortBy("age");
+                      setSortOrder("asc");
+                      setIsSortDropdownOpen(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.statusOptionText,
+                        sortBy === "age" &&
+                          sortOrder === "asc" &&
+                          styles.statusOptionTextSelected,
+                      ]}
+                    >
+                      Age (Low to High)
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.statusOption,
+                      sortBy === "age" &&
+                        sortOrder === "desc" &&
+                        styles.statusOptionSelected,
+                    ]}
+                    onPress={() => {
+                      setSortBy("age");
+                      setSortOrder("desc");
+                      setIsSortDropdownOpen(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.statusOptionText,
+                        sortBy === "age" &&
+                          sortOrder === "desc" &&
+                          styles.statusOptionTextSelected,
+                      ]}
+                    >
+                      Age (High to Low)
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            </Modal>
             {/* Pagination pinned to bottom - outside ScrollView */}
             {totalItems > 0 && totalPages > 0 && (
-              <View style={[styles.pagination, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-                  <View style={styles.paginationLeft}>
-                    <Text style={styles.paginationText}>Show</Text>
-                    <View
-                      style={styles.itemsPerPageContainer}
-                      ref={itemsPerPageButtonRef}
+              <View
+                style={[
+                  styles.pagination,
+                  { paddingBottom: Math.max(insets.bottom, 16) },
+                ]}
+              >
+                <View style={styles.paginationLeft}>
+                  <Text style={styles.paginationText}>Show</Text>
+                  <View
+                    style={styles.itemsPerPageContainer}
+                    ref={itemsPerPageButtonRef}
+                  >
+                    <TouchableOpacity
+                      style={styles.itemsPerPageSelect}
+                      onPress={() => {
+                        itemsPerPageButtonRef.current?.measure(
+                          (x, y, width, height, pageX, pageY) => {
+                            setDropdownPosition({ x: pageX, y: pageY - 160 }); // Position above the button
+                            setIsItemsPerPageDropdownOpen(true);
+                          }
+                        );
+                      }}
+                    >
+                      <Text style={styles.itemsPerPageText}>
+                        {itemsPerPage}
+                      </Text>
+                      <Ionicons name="chevron-down" size={16} color="#6B7280" />
+                    </TouchableOpacity>
+                    <Modal
+                      visible={isItemsPerPageDropdownOpen}
+                      transparent={true}
+                      animationType="fade"
+                      onRequestClose={() =>
+                        setIsItemsPerPageDropdownOpen(false)
+                      }
                     >
                       <TouchableOpacity
-                        style={styles.itemsPerPageSelect}
-                        onPress={() => {
-                          itemsPerPageButtonRef.current?.measure(
-                            (x, y, width, height, pageX, pageY) => {
-                              setDropdownPosition({ x: pageX, y: pageY - 160 }); // Position above the button
-                              setIsItemsPerPageDropdownOpen(true);
-                            }
-                          );
-                        }}
+                        style={styles.itemsPerPageOverlay}
+                        activeOpacity={1}
+                        onPress={() => setIsItemsPerPageDropdownOpen(false)}
                       >
-                        <Text style={styles.itemsPerPageText}>
-                          {itemsPerPage}
-                        </Text>
-                        <Ionicons
-                          name="chevron-down"
-                          size={16}
-                          color="#6B7280"
-                        />
-                      </TouchableOpacity>
-                      <Modal
-                        visible={isItemsPerPageDropdownOpen}
-                        transparent={true}
-                        animationType="fade"
-                        onRequestClose={() =>
-                          setIsItemsPerPageDropdownOpen(false)
-                        }
-                      >
-                        <TouchableOpacity
-                          style={styles.itemsPerPageOverlay}
-                          activeOpacity={1}
-                          onPress={() => setIsItemsPerPageDropdownOpen(false)}
-                        >
-                          <View
-                            style={[
-                              styles.itemsPerPageModalContainer,
-                              {
-                                top: dropdownPosition.y,
-                                left: dropdownPosition.x,
-                              },
-                            ]}
-                          >
-                            <View style={styles.itemsPerPageDropdown}>
-                              {[5, 10, 50, 100].map((value) => (
-                                <TouchableOpacity
-                                  key={value}
-                                  style={[
-                                    styles.itemsPerPageOption,
-                                    itemsPerPage === value &&
-                                      styles.itemsPerPageOptionActive,
-                                  ]}
-                                  onPress={() => {
-                                    setItemsPerPage(value);
-                                    setIsItemsPerPageDropdownOpen(false);
-                                  }}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.itemsPerPageOptionText,
-                                      itemsPerPage === value &&
-                                        styles.itemsPerPageOptionTextActive,
-                                    ]}
-                                  >
-                                    {value}
-                                  </Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                          </View>
-                        </TouchableOpacity>
-                      </Modal>
-                    </View>
-                    <Text style={styles.paginationText}>
-                      Showing {startItem} to {endItem} of {totalItems} entries
-                    </Text>
-                  </View>
-                  <View style={styles.paginationRight}>
-                    <TouchableOpacity
-                      style={[
-                        styles.paginationButton,
-                        currentPage === 1 && styles.paginationButtonDisabled,
-                      ]}
-                      onPress={() => setCurrentPage(1)}
-                      disabled={currentPage === 1}
-                    >
-                      <Text style={styles.paginationButtonText}>{"<<"}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.paginationButton,
-                        currentPage === 1 && styles.paginationButtonDisabled,
-                      ]}
-                      onPress={() =>
-                        setCurrentPage(Math.max(1, currentPage - 1))
-                      }
-                      disabled={currentPage === 1}
-                    >
-                      <Text style={styles.paginationButtonText}>Prev</Text>
-                    </TouchableOpacity>
-                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                      let pageNum;
-                      if (totalPages <= 5) {
-                        pageNum = i + 1;
-                      } else if (currentPage <= 3) {
-                        pageNum = i + 1;
-                      } else if (currentPage >= totalPages - 2) {
-                        pageNum = totalPages - 4 + i;
-                      } else {
-                        pageNum = currentPage - 2 + i;
-                      }
-                      return (
-                        <TouchableOpacity
-                          key={pageNum}
+                        <View
                           style={[
-                            styles.paginationButton,
-                            currentPage === pageNum &&
-                              styles.paginationButtonActive,
+                            styles.itemsPerPageModalContainer,
+                            {
+                              top: dropdownPosition.y,
+                              left: dropdownPosition.x,
+                            },
                           ]}
-                          onPress={() => setCurrentPage(pageNum)}
                         >
-                          <Text
-                            style={[
-                              styles.paginationButtonText,
-                              currentPage === pageNum &&
-                                styles.paginationButtonTextActive,
-                            ]}
-                          >
-                            {pageNum}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                    <TouchableOpacity
-                      style={[
-                        styles.paginationButton,
-                        currentPage === totalPages &&
-                          styles.paginationButtonDisabled,
-                      ]}
-                      onPress={() =>
-                        setCurrentPage(Math.min(totalPages, currentPage + 1))
-                      }
-                      disabled={currentPage === totalPages}
-                    >
-                      <Text style={styles.paginationButtonText}>Next</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.paginationButton,
-                        currentPage === totalPages &&
-                          styles.paginationButtonDisabled,
-                      ]}
-                      onPress={() => setCurrentPage(totalPages)}
-                      disabled={currentPage === totalPages}
-                    >
-                      <Text style={styles.paginationButtonText}>{">>"}</Text>
-                    </TouchableOpacity>
-                    <View style={styles.goToContainer}>
-                      <Text style={styles.goToText}>Go to</Text>
-                      <View style={styles.goToInput}>
-                        <TextInput
-                          style={styles.goToInputText}
-                          value={goToValue}
-                          keyboardType="numeric"
-                          onChangeText={text => {
-                            const sanitized = text.replace(/[^0-9]/g, '');
-                            setGoToValue(sanitized);
-                          }}
-                          onSubmitEditing={() => {
-                            const page = parseInt(goToValue, 10);
-                            if (!Number.isNaN(page)) {
-                              const clamped = Math.min(
-                                Math.max(page, 1),
-                                Math.max(totalPages, 1),
-                              );
-                              setCurrentPage(clamped);
-                              setGoToValue(clamped.toString());
-                            } else {
-                              setGoToValue(currentPage.toString());
-                            }
-                          }}
-                          onBlur={() => {
-                            const page = parseInt(goToValue, 10);
-                            if (!Number.isNaN(page)) {
-                              const clamped = Math.min(
-                                Math.max(page, 1),
-                                Math.max(totalPages, 1),
-                              );
-                              setCurrentPage(clamped);
-                              setGoToValue(clamped.toString());
-                            } else {
-                              setGoToValue(currentPage.toString());
-                            }
-                          }}
-                        />
-                      </View>
+                          <View style={styles.itemsPerPageDropdown}>
+                            {[5, 10, 50, 100].map((value) => (
+                              <TouchableOpacity
+                                key={value}
+                                style={[
+                                  styles.itemsPerPageOption,
+                                  itemsPerPage === value &&
+                                    styles.itemsPerPageOptionActive,
+                                ]}
+                                onPress={() => {
+                                  setItemsPerPage(value);
+                                  setIsItemsPerPageDropdownOpen(false);
+                                }}
+                              >
+                                <Text
+                                  style={[
+                                    styles.itemsPerPageOptionText,
+                                    itemsPerPage === value &&
+                                      styles.itemsPerPageOptionTextActive,
+                                  ]}
+                                >
+                                  {value}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    </Modal>
+                  </View>
+                  <Text style={styles.paginationText}>
+                    Showing {startItem} to {endItem} of {totalItems} entries
+                  </Text>
+                </View>
+                <View style={styles.paginationRight}>
+                  <TouchableOpacity
+                    style={[
+                      styles.paginationButton,
+                      currentPage === 1 && styles.paginationButtonDisabled,
+                    ]}
+                    onPress={() => setCurrentPage(1)}
+                    disabled={currentPage === 1}
+                  >
+                    <Text style={styles.paginationButtonText}>{"<<"}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.paginationButton,
+                      currentPage === 1 && styles.paginationButtonDisabled,
+                    ]}
+                    onPress={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <Text style={styles.paginationButtonText}>Prev</Text>
+                  </TouchableOpacity>
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum;
+                    if (totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i;
+                    } else {
+                      pageNum = currentPage - 2 + i;
+                    }
+                    return (
+                      <TouchableOpacity
+                        key={pageNum}
+                        style={[
+                          styles.paginationButton,
+                          currentPage === pageNum &&
+                            styles.paginationButtonActive,
+                        ]}
+                        onPress={() => setCurrentPage(pageNum)}
+                      >
+                        <Text
+                          style={[
+                            styles.paginationButtonText,
+                            currentPage === pageNum &&
+                              styles.paginationButtonTextActive,
+                          ]}
+                        >
+                          {pageNum}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  <TouchableOpacity
+                    style={[
+                      styles.paginationButton,
+                      currentPage === totalPages &&
+                        styles.paginationButtonDisabled,
+                    ]}
+                    onPress={() =>
+                      setCurrentPage(Math.min(totalPages, currentPage + 1))
+                    }
+                    disabled={currentPage === totalPages}
+                  >
+                    <Text style={styles.paginationButtonText}>Next</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.paginationButton,
+                      currentPage === totalPages &&
+                        styles.paginationButtonDisabled,
+                    ]}
+                    onPress={() => setCurrentPage(totalPages)}
+                    disabled={currentPage === totalPages}
+                  >
+                    <Text style={styles.paginationButtonText}>{">>"}</Text>
+                  </TouchableOpacity>
+                  <View style={styles.goToContainer}>
+                    <Text style={styles.goToText}>Go to</Text>
+                    <View style={styles.goToInput}>
+                      <TextInput
+                        style={styles.goToInputText}
+                        value={goToValue}
+                        keyboardType="numeric"
+                        onChangeText={(text) => {
+                          const sanitized = text.replace(/[^0-9]/g, "");
+                          setGoToValue(sanitized);
+                        }}
+                        onSubmitEditing={() => {
+                          const page = parseInt(goToValue, 10);
+                          if (!Number.isNaN(page)) {
+                            const clamped = Math.min(
+                              Math.max(page, 1),
+                              Math.max(totalPages, 1)
+                            );
+                            setCurrentPage(clamped);
+                            setGoToValue(clamped.toString());
+                          } else {
+                            setGoToValue(currentPage.toString());
+                          }
+                        }}
+                        onBlur={() => {
+                          const page = parseInt(goToValue, 10);
+                          if (!Number.isNaN(page)) {
+                            const clamped = Math.min(
+                              Math.max(page, 1),
+                              Math.max(totalPages, 1)
+                            );
+                            setCurrentPage(clamped);
+                            setGoToValue(clamped.toString());
+                          } else {
+                            setGoToValue(currentPage.toString());
+                          }
+                        }}
+                      />
                     </View>
                   </View>
                 </View>
-              )}
+              </View>
+            )}
           </View>
         </View>
       </View>
@@ -1006,6 +1168,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     color: "#FFFFFF",
+  },
+  filterButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   filterButton: {
     flexDirection: "row",

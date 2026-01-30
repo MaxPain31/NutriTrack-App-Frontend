@@ -330,7 +330,9 @@ export async function getChildren(
   isArchive?: number,
   wfaId?: number,
   wfhId?: number,
-  hfaId?: number
+  hfaId?: number,
+  sortBy?: 'name' | 'age',
+  sortOrder?: 'asc' | 'desc'
 ): Promise<ChildrenResponse> {
   const key = [
     token,
@@ -342,6 +344,8 @@ export async function getChildren(
     wfaId ?? '',
     wfhId ?? '',
     hfaId ?? '',
+    sortBy || '',
+    sortOrder || '',
   ].join('|');
 
   // If there's already a request in-flight with the same params, reuse it
@@ -379,6 +383,14 @@ export async function getChildren(
 
     if (typeof hfaId === 'number') {
       params.append('hfa_id', hfaId.toString());
+    }
+
+    if (sortBy) {
+      params.append('sort_by', sortBy);
+    }
+
+    if (sortOrder) {
+      params.append('sort_order', sortOrder);
     }
 
     const response = await fetch(`${API_BASE_URL}/api/children?${params.toString()}`, {

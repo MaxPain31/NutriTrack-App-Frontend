@@ -201,7 +201,11 @@ export default function EditChildScreen() {
   };
 
   const handleCancel = () => {
-    router.back();
+    // Navigate to child-details with childId - this will reload the page
+    router.replace({
+      pathname: '/(children)/child-details',
+      params: { id: childId },
+    } as any);
   };
 
   const handleSaveClick = () => {
@@ -358,20 +362,36 @@ export default function EditChildScreen() {
       });
       console.log('FormData entries:', formDataEntries);
       
-      // Use fetch with FormData - base64 strings work fine with fetch
-      const response = await fetch(`${API_BASE_URL}/api/children/${childId}`, {
-        method: 'PUT',
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData as any,
+      // Use XMLHttpRequest for file uploads - React Native fetch has FormData issues
+      const xhr = new XMLHttpRequest();
+      
+      const responseData = await new Promise<{ errors?: Record<string, string[]>; message?: string }>((resolve, reject) => {
+        xhr.onload = () => {
+          try {
+            const data = JSON.parse(xhr.responseText) as { errors?: Record<string, string[]>; message?: string };
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve(data);
+            } else {
+              resolve(data);
+            }
+          } catch (error) {
+            reject(new Error('Failed to parse response'));
+          }
+        };
+        
+        xhr.onerror = () => {
+          reject(new Error('Network error'));
+        };
+        
+        xhr.open('PUT', `${API_BASE_URL}/api/children/${childId}`);
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.send(formData as any);
       });
 
-      const responseData = await response.json() as { errors?: Record<string, string[]>; message?: string };
       console.log('Update child API response:', responseData);
 
-      if (!response.ok) {
+      if (xhr.status < 200 || xhr.status >= 300) {
         let message = 'Failed to update child.';
         if (responseData && responseData.errors) {
           const firstKey = Object.keys(responseData.errors)[0];
@@ -386,6 +406,7 @@ export default function EditChildScreen() {
         setStatusModalTitle('Error');
         setStatusModalMessage(message);
         setStatusModalVisible(true);
+        setIsSaving(false);
         return;
       }
 
@@ -1016,10 +1037,8 @@ export default function EditChildScreen() {
                   onPress={() => {
                     setStatusModalVisible(false);
                     if (statusModalTitle === "Success") {
-                      router.replace({
-                        pathname: "/(children)/child-details",
-                        params: { id: childId },
-                      } as any);
+                      // Go back to previous page (child-details) - maintains navigation stack
+                      router.back();
                     }
                   }}
                 >

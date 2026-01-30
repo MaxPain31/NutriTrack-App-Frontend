@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "nutri-track",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.app.nutritrack"
@@ -36,10 +36,15 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": true,
+            "newArchEnabled": true
+          },
+          "ios": {
+            "newArchEnabled": true
           }
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

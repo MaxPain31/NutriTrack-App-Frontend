@@ -3,8 +3,8 @@ import { ChildData, getChildById } from '@/lib/api';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   SafeAreaView,
@@ -76,112 +76,121 @@ export default function ChildDetailsScreen() {
       .map(word => word[0].toUpperCase() + word.slice(1))
       .join(' ');
 
-  useEffect(() => {
-    const loadChild = async () => {
-      if (!token || !isAuthenticated || !childId) {
-        setIsLoading(false);
+  const loadChild = useCallback(async () => {
+    if (!token || !isAuthenticated || !childId) {
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const apiChild: ChildData = await getChildById(token, childId);
+
+      const rawNameExtension = (apiChild as any).name_extension;
+      const nameExtensionLabel =
+        (rawNameExtension && rawNameExtension.name_extension) ||
+        (apiChild as any)?.name_extension_name ||
+        null;
+      const middleInitial = apiChild.child_middle_name
+        ? `${apiChild.child_middle_name.charAt(0).toUpperCase()}. `
+        : '';
+      const fullName = `${apiChild.child_first_name} ${middleInitial}${apiChild.child_last_name}`;
+      const displayName = toTitleCase(fullName);
+
+      const barangayName = apiChild.barangay?.barangay_name;
+      const municipalityName = apiChild.municipality?.municipality_name;
+      const address =
+        barangayName && municipalityName
+          ? `${barangayName}, ${municipalityName}`
+          : '';
+
+      const interventionsList =
+        apiChild.interventions && apiChild.interventions.length > 0
+          ? apiChild.interventions
+              .map(i => i.intervention?.intervention_name)
+              .filter(Boolean)
+              .join(', ')
+          : null;
+
+      const healthConditionsList =
+        apiChild.health_conditions && apiChild.health_conditions.length > 0
+          ? apiChild.health_conditions
+              .map(h => h.health_condition?.condition_name)
+              .filter(Boolean)
+              .join(', ')
+          : null;
+
+      // Construct caregiver full name
+      const caregiverFirstName = apiChild.caregiver?.caregiver_first_name ?? null;
+      const caregiverMiddleName = apiChild.caregiver?.caregiver_middle_name ?? null;
+      const caregiverLastName = apiChild.caregiver?.caregiver_last_name ?? null;
+      let caregiverFullName: string | null = null;
+      if (caregiverFirstName || caregiverLastName) {
+        const middleInitial = caregiverMiddleName
+          ? `${caregiverMiddleName.charAt(0).toUpperCase()}. `
+          : '';
+        caregiverFullName = `${caregiverFirstName || ''} ${middleInitial}${caregiverLastName || ''}`.trim();
+        caregiverFullName = toTitleCase(caregiverFullName);
+      }
+
+      // Check if image_path contains "default" or is null/empty
+      const imagePath = apiChild.image_path || '';
+      const isDefaultImage = !imagePath || imagePath.toLowerCase().includes('default');
+      const imageUrl = isDefaultImage ? null : ((apiChild as any).image_url || null);
+      
+      console.log('Child image_url:', imageUrl);
+      console.log('Child image_path:', apiChild.image_path);
+      console.log('Is default image:', isDefaultImage);
+      
+      setChildData({
+        id: apiChild.child_id,
+        name: displayName,
+        firstName: apiChild.child_first_name,
+        middleName: apiChild.child_middle_name ?? null,
+        lastName: apiChild.child_last_name,
+        nameExtension: apiChild.name_extension_id ? String(apiChild.name_extension_id) : null,
+        nameExtensionLabel,
+        height: parseFloat(apiChild.height) || 0,
+        weight: parseFloat(apiChild.weight) || 0,
+        ageMonths: apiChild.age,
+        birthdate: apiChild.child_birthdate,
+        sex: apiChild.sex?.sex || '',
+        address,
+        municipalityName,
+        barangayName,
+        caregiver: caregiverFullName,
+        caregiverFirstName,
+        caregiverMiddleName,
+        caregiverLastName,
+        activeIntervention: interventionsList,
+        healthCondition: healthConditionsList,
+        weightForHeight: normalizeStatus(apiChild.wfh?.wfh_status),
+        weightForAge: normalizeStatus(apiChild.wfa?.wfa_status),
+        heightForAge: normalizeStatus(apiChild.hfa?.hfa_status),
+        profileImage: imageUrl,
+      });
+    } catch (error) {
+      console.error('Error loading child details:', error);
+      if (error instanceof Error && error.message === 'TOKEN_INVALIDATED') {
+        handleTokenInvalidation();
         return;
       }
-
-      try {
-        const apiChild: ChildData = await getChildById(token, childId);
-
-        const rawNameExtension = (apiChild as any).name_extension;
-        const nameExtensionLabel =
-          (rawNameExtension && rawNameExtension.name_extension) ||
-          (apiChild as any)?.name_extension_name ||
-          null;
-        const middleInitial = apiChild.child_middle_name
-          ? `${apiChild.child_middle_name.charAt(0).toUpperCase()}. `
-          : '';
-        const fullName = `${apiChild.child_first_name} ${middleInitial}${apiChild.child_last_name}`;
-        const displayName = toTitleCase(fullName);
-
-        const barangayName = apiChild.barangay?.barangay_name;
-        const municipalityName = apiChild.municipality?.municipality_name;
-        const address =
-          barangayName && municipalityName
-            ? `${barangayName}, ${municipalityName}`
-            : '';
-
-        const interventionsList =
-          apiChild.interventions && apiChild.interventions.length > 0
-            ? apiChild.interventions
-                .map(i => i.intervention?.intervention_name)
-                .filter(Boolean)
-                .join(', ')
-            : null;
-
-        const healthConditionsList =
-          apiChild.health_conditions && apiChild.health_conditions.length > 0
-            ? apiChild.health_conditions
-                .map(h => h.health_condition?.condition_name)
-                .filter(Boolean)
-                .join(', ')
-            : null;
-
-        // Construct caregiver full name
-        const caregiverFirstName = apiChild.caregiver?.caregiver_first_name ?? null;
-        const caregiverMiddleName = apiChild.caregiver?.caregiver_middle_name ?? null;
-        const caregiverLastName = apiChild.caregiver?.caregiver_last_name ?? null;
-        let caregiverFullName: string | null = null;
-        if (caregiverFirstName || caregiverLastName) {
-          const middleInitial = caregiverMiddleName
-            ? `${caregiverMiddleName.charAt(0).toUpperCase()}. `
-            : '';
-          caregiverFullName = `${caregiverFirstName || ''} ${middleInitial}${caregiverLastName || ''}`.trim();
-          caregiverFullName = toTitleCase(caregiverFullName);
-        }
-
-        // Check if image_path contains "default" or is null/empty
-        const imagePath = apiChild.image_path || '';
-        const isDefaultImage = !imagePath || imagePath.toLowerCase().includes('default');
-        const imageUrl = isDefaultImage ? null : ((apiChild as any).image_url || null);
-        
-        console.log('Child image_url:', imageUrl);
-        console.log('Child image_path:', apiChild.image_path);
-        console.log('Is default image:', isDefaultImage);
-        
-        setChildData({
-          id: apiChild.child_id,
-          name: displayName,
-          firstName: apiChild.child_first_name,
-          middleName: apiChild.child_middle_name ?? null,
-          lastName: apiChild.child_last_name,
-          nameExtension: apiChild.name_extension_id ? String(apiChild.name_extension_id) : null,
-          nameExtensionLabel,
-          height: parseFloat(apiChild.height) || 0,
-          weight: parseFloat(apiChild.weight) || 0,
-          ageMonths: apiChild.age,
-          birthdate: apiChild.child_birthdate,
-          sex: apiChild.sex?.sex || '',
-          address,
-          municipalityName,
-          barangayName,
-          caregiver: caregiverFullName,
-          caregiverFirstName,
-          caregiverMiddleName,
-          caregiverLastName,
-          activeIntervention: interventionsList,
-          healthCondition: healthConditionsList,
-          weightForHeight: normalizeStatus(apiChild.wfh?.wfh_status),
-          weightForAge: normalizeStatus(apiChild.wfa?.wfa_status),
-          heightForAge: normalizeStatus(apiChild.hfa?.hfa_status),
-          profileImage: imageUrl,
-        });
-      } catch (error) {
-        console.error('Error loading child details:', error);
-        if (error instanceof Error && error.message === 'TOKEN_INVALIDATED') {
-          handleTokenInvalidation();
-          return;
-        }
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadChild();
+    } finally {
+      setIsLoading(false);
+    }
   }, [token, isAuthenticated, childId, handleTokenInvalidation]);
+
+  // Load data when component mounts
+  useEffect(() => {
+    loadChild();
+  }, [loadChild]);
+
+  // Reload data when page comes into focus (e.g., when navigating back from edit-child)
+  useFocusEffect(
+    useCallback(() => {
+      loadChild();
+    }, [loadChild])
+  );
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -228,7 +237,7 @@ export default function ChildDetailsScreen() {
         <View style={styles.content}>
           <View style={[styles.header, { paddingTop: Math.max(insets.top, 20) }]}>
             <TouchableOpacity
-              onPress={() => router.back()}
+              onPress={() => router.replace('/(children)/child-list' as any)}
               style={styles.headerBack}>
               <Ionicons name="chevron-back" size={22} color="#111827" />
             </TouchableOpacity>
@@ -249,7 +258,7 @@ export default function ChildDetailsScreen() {
         {/* Header */}
         <View style={[styles.header, { paddingTop: Math.max(insets.top, 20) }]}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => router.replace('/(children)/child-list?refresh=' + Date.now() as any)}
             style={styles.headerBack}>
             <Ionicons name="chevron-back" size={22} color="#111827" />
           </TouchableOpacity>
@@ -444,7 +453,7 @@ export default function ChildDetailsScreen() {
               } as any)
             }>
             <Ionicons name="create-outline" size={18} color="#FFFFFF" />
-            <Text style={styles.editButtonText}>Edit</Text>
+            <Text style={styles.editButtonText}>Edit Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.updateButton}
@@ -462,7 +471,7 @@ export default function ChildDetailsScreen() {
               } as any)
             }>
             <Ionicons name="refresh-outline" size={18} color="#FFFFFF" />
-            <Text style={styles.updateButtonText}>Update</Text>
+            <Text style={styles.updateButtonText}>Add Progress</Text>
           </TouchableOpacity>
         </View>
       </View>
